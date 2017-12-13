@@ -3,16 +3,7 @@ from .webob import Request as webob_request
 import webob, traceback, sys
 from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
 import os.path, os, stat
-from threading import RLock
-
-_interlock = RLock()
-
-def atomic(func):
-    def new_func(*params, **args):
-        with _interlock:
-            return func(*params, **args)
-    return new_func
-        
+from pythreader import Primitive
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -47,7 +38,7 @@ class HTTPResponseException(Exception):
 
 
     
-class WSGIHandler:
+class PyWebHandler:
 
     MIME_TYPES_BASE = {
         "gif":   "image/gif",
@@ -64,8 +55,6 @@ class WSGIHandler:
         self.Request = request
         self.MyPath = path
         self.BeingDestroyed = False
-        self.AppURI = self.App.ScriptName
-        self.AppURL = request.application_url
         #print "Handler created"
 
     def setPath(self, path):
@@ -128,23 +117,10 @@ class WSGIHandler:
         pass
 
     def render_to_string(self, temp, **args):
-        params = {
-            'APP_URI':  self.AppURI,
-            'APP_URL':  self.AppURL,
-            'MY_PATH':  self.MyPath
-            }
-        params.update(args)
-        return self.App.render_to_string(temp, **params)
+        return self.App.render_to_string(temp, **args)
 
     def render_to_iterator(self, temp, **args):
-        params = {
-            'APP_URI':  self.AppURI,
-            'APP_URL':  self.AppURL,
-            'MY_PATH':  self.MyPath
-            }
-        params.update(args)
-        #print 'render_to_iterator:', params
-        return self.App.render_to_iterator(temp, **params)
+        return self.App.render_to_iterator(temp, **args)
 
     def render_to_response(self, temp, **more_args):
         return Response(self.render_to_string(temp, **more_args))
@@ -177,12 +153,13 @@ class WSGIHandler:
     def getSessionData(self):
         return self.App.getSessionData()
         
+    def scriptUri(self, ignored=None):
+        return self.Request.environ.get('SCRIPT_NAME',
+                os.environ.get('SCRIPT_NAME', '')
+        )
         
-    def scriptUri(self):
-        return self.App.scriptUri()
-       
-    def uriDir(self):
-        return self.App.uriDir()
+    def uriDir(self, ignored=None):
+        return os.path.dirname(self.scriptUri())
 
     def renderTemplate(self, ignored, template, _dict = {}, **args):
         # backward compatibility method
@@ -204,55 +181,56 @@ try:
 except:
     _UseJinja2 = False
 
-
-class WSGIApp:
-
-    Version = "Undefined"
-
-    def __init__(self, request, root_class):
-        self.RootClass = root_class
-        self.Request = request
-        self.JEnv = None
-        self.ScriptName = None
-        self.JGlobals = {}
-        self.Script = request.environ.get('SCRIPT_FILENAME', 
-            os.environ.get('UWSGI_SCRIPT_FILENAME'))
-        self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
-        #for k in sorted(request.environ.keys()):
-        #    print ("%s = %s" % (k, request.environ[k]))
-        if self.ScriptHome and _UseJinja2:
-            # default Jinja2 templates search path:
-            # 1. where the App script is
-            # 2. templates subdirectory
-            self.initJinja2(tempdirs = [
-                self.ScriptHome, 
-                os.path.join(self.ScriptHome, 'templates')
-                ])
-
-    def setJinjaFilters(self, filters):
-            for n, f in filters.items():
-                self.JEnv.filters[n] = f
-
-    def setJinjaGlobals(self, globals):
-            self.JGlobals = {}
-            self.JGlobals.update(globals)
-
-    def initJinja2(self, tempdirs = [], filters = {}, globals = {}):
-        # to be called by subclass
-        #print "initJinja2(%s)" % (tempdirs,)
+class J2Env:
+    def __init__(self, homedir):
         if _UseJinja2:
             from jinja2 import Environment, FileSystemLoader
-            if type(tempdirs) != type([]):
-                tempdirs = [tempdirs]
+            tempdirs = [homedir, os.path.join(homedir, 'templates']
             self.JEnv = Environment(
                 loader=FileSystemLoader(tempdirs)
                 )
-            for n, f in filters.items():
-                self.JEnv.filters[n] = f
             self.JGlobals = {}
-            self.JGlobals.update(globals)
-                
+
+    def addFilters(self, filters):
+        for n, f in filters.items():
+            self.JEnv.filters[n] = f
+            
+    def addGlobals(self, gbl):
+        self.JGlobals.update(gbl)
         
+    def render_to_string(self, temp, **kv):
+        t = self.JEnv.get_template(temp)
+        return t.render(self.addEnvironment(kv))
+
+    def render_to_iterator(self, temp, **kv):
+        t = self.JEnv.get_template(temp)
+        return t.generate(self.addEnvironment(kv))
+        
+class PyWebApp(Primitive):
+
+    Version = "Undefined"
+
+    def __init__(self, root_class):
+        Primitive.__init__(self)
+        self.RootClass = root_class
+        self.Initialized = False
+        
+    @synchronized
+    def initOnce(self, request):
+        if not self.Initialized:
+            self.Script = request.environ.get('SCRIPT_FILENAME', 
+                os.environ.get('UWSGI_SCRIPT_FILENAME'))
+            self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
+            if _UseJinja2:
+                self.JEnv = J2Env(self.ScriptHome)
+            self.Initialized = True
+        
+    def setJinjaFilters(self, filters):
+        self.JEnv.addFilters(filters)
+
+    def setJinjaGlobals(self, globals):
+        self.JEnv.addGlobals(globals)
+
     def destroy(self):
         # override me
         pass
@@ -319,15 +297,15 @@ class WSGIApp:
     
     
     def wsgi_call(self, environ, start_response):
+        req = Request(environ)
+        self.initOnce(req)
         #print 'wsgi_call...'
         path_to = '/'
         path_down = environ.get('PATH_INFO', '')
         #print 'path:', path_down
         self.ScriptName = environ.get('SCRIPT_NAME','')
-        req = self.Request
         root = self.RootClass(req, self)
         #print 'root created'
-        self.init(root)
         #print 'initialized'
         try:
             #print 'find_object..'
@@ -374,59 +352,35 @@ class WSGIApp:
     def __call__(self, environ, start_response):
         return self.wsgi_call(environ, start_response)
             
-    def JinjaGlobals(self):
-        # override me
-        return {}
-
-    def addEnvironment(self, d):
-        params = {  
-            "GLOBAL_AppTopPath":    self.scriptUri(),
-            "GLOBAL_AppDirPath":    self.uriDir(),
-            "GLOBAL_ImagesPath":    self.uriDir()+"/images",
-            "GLOBAL_AppVersion":    self.Version,
-            "GLOBAL_AppObject":     self,
-            }
-        params.update(self.JGlobals)
-        params.update(self.JinjaGlobals())
-        params.update(d)
-        #print params
-        return params
-
     def render_to_string(self, temp, **kv):
-        t = self.JEnv.get_template(temp)
-        return t.render(self.addEnvironment(kv))
+        params = {
+            "GLOBAL_AppVersion":    self.Version,
+            "GLOBAL_AppObject":     self
+            }
+        params.update(kv)
+        return self.JEnv.render_to_string(temp, **params)
 
     def render_to_iterator(self, temp, **kv):
-        t = self.JEnv.get_template(temp)
-        return t.generate(self.addEnvironment(kv))
+        params = {
+            "GLOBAL_AppVersion":    self.Version,
+            "GLOBAL_AppObject":     self
+            }
+        params.update(kv)
+        return self.JEnv.render_to_iterator(temp, **params)
         
-    # backward compatibility
-    def scriptUri(self, ignored=None):
-        return self.Request.environ.get('SCRIPT_NAME',
-                os.environ.get('SCRIPT_NAME', '')
-        )
-        
-    def uriDir(self, ignored=None):
-        return os.path.dirname(self.scriptUri())
-        
+def createApplication(appclass, handlerclass, *params, **args):
+    return appclass(handlerclass, *params, **args)
+    
 
-            
-def Application(appclass, handlerclass, *params, **args):
-    def app_function(environ, start_response):
-        #print "app_function: appclass=%s, handlerclass=%s" % (appclass, handlerclass)
-        request = Request(environ)
-        app = appclass(request, handlerclass, *params, **args)
-        return app(environ, start_response)
-    return app_function
 
         
 if __name__ == '__main__':
     from .HTTPServer import HTTPServer
     
-    class MyApp(WSGIApp):
+    class MyApp(PyWebApp):
         pass
         
-    class MyHandler(WSGIHandler):
+    class MyHandler(PyWebHandler):
     
         def env(self, request, relpath, **args):
             resp_lines = (
@@ -434,7 +388,7 @@ if __name__ == '__main__':
                 )
             return Response(app_iter = resp_lines, content_type="text/plain")
             
-    app = Application(MyApp, MyHandler)
+    app = createApplication(MyApp, MyHandler)
     hs = HTTPServer(8001, "*", app)
     hs.start()
     hs.join()
