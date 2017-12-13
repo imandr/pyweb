@@ -1,9 +1,9 @@
 from .webob import Response
 from .webob import Request as webob_request
 import webob, traceback, sys
-from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
+from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPNotFound
 import os.path, os, stat
-from pythreader import Primitive
+from threader import Primitive, synchronized
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -92,18 +92,6 @@ class PyWebHandler:
         return Response(app_iter = read_iter(open(path, "rb")),
             content_type = mime_type)
 
-    def _destroy(self):
-        self.App = None
-        if self.BeingDestroyed: return      # avoid infinite loops
-        self.BeingDestroyed = True
-        for k in self.__dict__:
-            o = self.__dict__[k]
-            if isinstance(o, WSGIHandler):
-                try:    o.destroy()
-                except: pass
-                o._destroy()
-        self.BeingDestroyed = False
-        
     def hello(self, req, relpath):
         resp = Response("Hello")
         return resp
@@ -173,6 +161,72 @@ class PyWebHandler:
         for k in sorted(req.environ.keys()):
             lines.append("%s = %s\n" % (k, req.environ[k]))
         return Response(app_iter = lines, content_type = "text/plain")
+        
+        
+    #
+    # Recursive request processing
+    #
+    def processRequest(self, request, my_path, path_down):
+        print "processRequest(%s, %s)" % (my_path, path_down)
+        self.setPath(my_path)
+        self.initAtPath(my_path)
+        words = path_down.split("/", 1)
+        item = words[0]
+        try:    obj = getattr(self, item)
+        except AttributeError:
+            resp = HTTPNotFound(detail="invalid path")
+        else:
+            rest = "" if len(words) == 1 else words[1]
+        
+            if isinstance(obj, PyWebHandler):
+                obj_path = my_path + item if my_path[-1:] == "/" else my_path + "/" + item
+                resp = obj.processRequest(request, obj_path, rest)
+            else:
+                # parse query arguments
+                dict = {}
+                for k in request.str_GET.keys():
+                    v = request.str_GET.getall(k)
+                    if type(v) == type([]) and len(v) == 1:
+                        v = v[0]
+                    dict[k] = v
+                try:
+                    #print 'calling method: ',m
+                    resp = obj(request, rest, **dict)
+                    #print resp
+                except HTTPException, val:
+                    #print 'caught:', type(val), val
+                    resp = val
+                except HTTPResponseException, val:
+                    #print 'caught:', type(val), val
+                    resp = val
+                except:
+                    resp = self.applicationErrorResponse(
+                        "Uncaught exception", sys.exc_info())
+                if resp == None:
+                    resp = request.getResponse()
+        finally:
+            self.destroy()
+        return resp
+            
+        
+    #
+    # Method permissions
+    #
+    def _checkPermissions(self, method):
+        #self.apacheLog("doc: %s" % (x.__doc__,))
+        try:    docstr = method.__doc__
+        except: docstr = None
+        if docstr and docstr[:10] == '__roles__:':
+            roles = [x.strip() for x in docstr[10:].strip().split(',')]
+            #self.apacheLog("roles: %s" % (roles,))
+            return self.checkRoles(roles)
+        return True
+        
+    def checkRoles(self, roles):
+        # override me
+        return True
+
+    
     
 _UseJinja2 = True
 
@@ -185,7 +239,7 @@ class J2Env:
     def __init__(self, homedir):
         if _UseJinja2:
             from jinja2 import Environment, FileSystemLoader
-            tempdirs = [homedir, os.path.join(homedir, 'templates']
+            tempdirs = [homedir, os.path.join(homedir, 'templates')]
             self.JEnv = Environment(
                 loader=FileSystemLoader(tempdirs)
                 )
@@ -255,7 +309,7 @@ class PyWebApp(Primitive):
         # Now we get the attribute; getattr(a, 'b') is equivalent
         # to a.b...
         next_obj = getattr(obj, next)
-        if isinstance(next_obj, WSGIHandler):
+        if isinstance(next_obj, PyWebHandler):
             if path_to and path_to[-1] != '/':
                 path_to += '/'
             path_to += next
@@ -269,20 +323,6 @@ class PyWebApp(Primitive):
         # at this point, self.Request.environ is ready to be used 
         pass
   
-    def _checkPermissions(self, x):
-        #self.apacheLog("doc: %s" % (x.__doc__,))
-        try:    docstr = x.__doc__
-        except: docstr = None
-        if docstr and docstr[:10] == '__roles__:':
-            roles = [x.strip() for x in docstr[10:].strip().split(',')]
-            #self.apacheLog("roles: %s" % (roles,))
-            return self.checkRoles(roles)
-        return True
-        
-    def checkRoles(self, roles):
-        # override me
-        return True
-
     def applicationErrorResponse(self, headline, exc_info):
         typ, val, tb = exc_info
         exc_text = traceback.format_exception(typ, val, tb)
@@ -302,56 +342,15 @@ class PyWebApp(Primitive):
         #print 'wsgi_call...'
         path_to = '/'
         path_down = environ.get('PATH_INFO', '')
+        while path_down and path_down.startswith("/"):  path_down = path_down[1:]
         #print 'path:', path_down
         self.ScriptName = environ.get('SCRIPT_NAME','')
         root = self.RootClass(req, self)
-        #print 'root created'
-        #print 'initialized'
-        try:
-            #print 'find_object..'
-            obj, method, relpath = self.find_object(path_to, root, path_down)
-        except AttributeError:
-            resp = Response("Invalid path %s" % (path_down,), 
-                            status = '500 Bad request')
-        except AssertionError:
-            resp = Response('Attempt to access private method',
-                    status = '500 Bad request')
-        else:
-            m = getattr(obj, method)
-            if not self._checkPermissions(m):
-                resp = Response('Authorization required',
-                    status = '403 Forbidden')
-            else:
-                dict = {}
-                for k in req.str_GET.keys():
-                    v = req.str_GET.getall(k)
-                    if type(v) == type([]) and len(v) == 1:
-                        v = v[0]
-                    dict[k] = v
-                try:
-                    #print 'calling method: ',m
-                    resp = m(req, relpath, **dict)
-                    #print resp
-                except HTTPException, val:
-                    #print 'caught:', type(val), val
-                    resp = val
-                except HTTPResponseException, val:
-                    #print 'caught:', type(val), val
-                    resp = val
-                except:
-                    resp = self.applicationErrorResponse(
-                        "Uncaught exception", sys.exc_info())
-                if resp == None:
-                    resp = req.getResponse()
-        out = resp(environ, start_response)
-        root._destroy()
-        self.destroy()
-        #print out
-        return out
+        resp = root.processRequest(req, path_to, path_down)
+        return resp(environ, start_response)
+
+    __call__ = wsgi_call
         
-    def __call__(self, environ, start_response):
-        return self.wsgi_call(environ, start_response)
-            
     def render_to_string(self, temp, **kv):
         params = {
             "GLOBAL_AppVersion":    self.Version,
@@ -368,27 +367,7 @@ class PyWebApp(Primitive):
         params.update(kv)
         return self.JEnv.render_to_iterator(temp, **params)
         
-def createApplication(appclass, handlerclass, *params, **args):
-    return appclass(handlerclass, *params, **args)
     
 
 
         
-if __name__ == '__main__':
-    from .HTTPServer import HTTPServer
-    
-    class MyApp(PyWebApp):
-        pass
-        
-    class MyHandler(PyWebHandler):
-    
-        def env(self, request, relpath, **args):
-            resp_lines = (
-                "%s = %s\n" % (k, v) for k, v in request.environ.items()
-                )
-            return Response(app_iter = resp_lines, content_type="text/plain")
-            
-    app = createApplication(MyApp, MyHandler)
-    hs = HTTPServer(8001, "*", app)
-    hs.start()
-    hs.join()

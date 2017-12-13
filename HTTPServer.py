@@ -1,6 +1,6 @@
 import fnmatch, traceback, sys, select
 from socket import *
-from pythreader import PyThread, synchronized
+from threader import PyThread, synchronized
 
 class InputStream:
     
@@ -43,6 +43,12 @@ class HTTPConnection(PyThread):
         self.QueryString = ''
         self.OutBuffer = []
         self.OutputEnabled = False
+
+    Debug = True
+        
+    def debug(self, msg):
+        if self.Debug:
+            print "HTTPConnection: %s" % (msg,)
 
     def requestReceived(self):
         #self.debug("requestReceived:[%s]" % (self.RequestBuffer,))
@@ -156,7 +162,7 @@ class HTTPConnection(PyThread):
                 #self.debug("wsgi_app done")
                 
         except:
-                #self.debug("Error: %s %s" % sys.exc_info()[:2])
+                self.debug("Error: %s %s" % sys.exc_info()[:2])
                 self.start_response("500 Error", 
                                 [("Content-Type","text/plain")])
                 self.OutBuffer += [traceback.format_exc()]

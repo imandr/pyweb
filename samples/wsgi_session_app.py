@@ -1,9 +1,9 @@
-from wsgi_py import WSGISessionApp, WSGIHandler, Application, run_server, Response
+from pyweb import PyWebSessionApp, PyWebHandler, run_server, Response
 
-class MyApp(WSGISessionApp):
+class MyApp(PyWebSessionApp):
     pass
     
-class MyHandler(WSGIHandler):
+class MyHandler(PyWebHandler):
 
     def set(self, request, relpath, name=None, value=None):
         self.App.session[name] = value
@@ -28,6 +28,6 @@ class MyHandler(WSGIHandler):
         )
         
         
-app = Application(MyApp, MyHandler)
+app = MyApp(MyHandler)
 
 run_server(8001, app)
