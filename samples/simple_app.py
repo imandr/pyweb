@@ -1,4 +1,4 @@
-from pyweb import HTTPServer, PyWebApp, PyWebHandler, Response
+from pyweb import HTTPServer, PyWebApp, PyWebHandler, Response, run_server
 from threader import synchronized
 
 class MyApp(PyWebApp):
@@ -26,6 +26,4 @@ class MyHandler(PyWebHandler):
         return Response("%d" % (self.App.count(),), content_type="text/plain")
         
 app = MyApp(MyHandler)
-hs = HTTPServer(8001, app)
-hs.start()
-hs.join()
+run_server(8000, app)

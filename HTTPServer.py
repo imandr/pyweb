@@ -1,6 +1,6 @@
 import fnmatch, traceback, sys, select
 from socket import *
-from threader import PyThread, synchronized
+from pythreader import PyThread, synchronized, Task, TaskQueue
 
 class InputStream:
     
@@ -21,12 +21,12 @@ class InputStream:
             out += w
         return out
 
-class HTTPConnection(PyThread):
+class HTTPConnection(Task):
 
     MAXMSG = 100000
 
     def __init__(self, server, csock, caddr):
-        PyThread.__init__(self)
+        Task.__init__(self)
         self.Server = server
         self.CAddr = caddr
         self.CSock = csock
@@ -244,11 +244,8 @@ class HTTPServer(PyThread):
         self.Port = port
         self.WSGIApp = app
         self.Match = url_pattern
-        self.Enabled = False
-        self.Connections = []
-        self.MaxConnections = max_connections
-        if enabled:
-            self.enableServer()
+        self.Enabled = enabled
+        self.ConnectionQueue = TaskQueue(max_connections, capacity=10)
         
 
     def urlMatch(self, path):
@@ -258,48 +255,46 @@ class HTTPServer(PyThread):
         return self.WSGIApp(env, start_response)
         
     @synchronized
-    def enableServer(self, backlog = 5):
+    def enable(self, backlog = 5):
         self.Enabled = True
+        self.wakeup()
                 
     @synchronized
-    def disableServer(self):
+    def disable(self):
         self.Enabled = False
+        self.wakeup()
 
     @synchronized
     def connectionClosed(self, conn):
-        if conn in self.Connections:
-            self.Connections.remove(conn)
-            
-    @synchronized
+        pass
+
     def connectionCount(self):
-        return len(self.Connections)    
-            
+        waiting, active = self.ConnectionQueue.tasks()
+        return len(waiting) + len(active)
+
     def run(self):
         self.Sock = socket(AF_INET, SOCK_STREAM)
         self.Sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         self.Sock.bind(('', self.Port))
-        self.Sock.listen(10)
+        self.Sock.listen(1)
         while True:
-            rlist, _, _  = select.select([self.Sock], [], [], 1)
-            if self.Enabled and self.connectionCount() < self.MaxConnections:
+            if self.Enabled:
                 csock, caddr = self.Sock.accept()
-                conn = HTTPConnection(self, csock, caddr)
-                self.Connections.append(conn)
-                conn.start()
-                
-                
+                self.ConnectionQueue << HTTPConnection(self, csock, caddr)
+            else:
+                self.await()
+
 def run_server(port, app, url_pattern="*"):
     srv = HTTPServer(port, app, url_pattern=url_pattern)
     srv.start()
     srv.join()
     
-
 if __name__ == '__main__':
 
     def app(env, start_response):
         start_response("200 OK", [("Content-Type","text/plain")])
         return (
-            "%s = %s\n" % (k,v) for k, v in env.items()
+            "%40s = %s\n" % (k,v) for k, v in env.items()
             )
 
     run_server(8000, app)
