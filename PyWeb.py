@@ -1,9 +1,19 @@
 from .webob import Response
 from .webob import Request as webob_request
 import webob, traceback, sys
-from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPNotFound
+from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPNotFound, HTTPForbidden
 import os.path, os, stat
 from threader import Primitive, synchronized
+
+def protected(*roles):
+    def decorator(method):
+        def decorated(self, req, *params, **args):
+            if self.App.authorized(req, roles):
+                return method(self, req, *params, **args)
+            else:
+                return HTTPForbidden()
+        return decorated
+    return decorator
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -209,24 +219,6 @@ class PyWebHandler:
         return resp
             
         
-    #
-    # Method permissions
-    #
-    def _checkPermissions(self, method):
-        #self.apacheLog("doc: %s" % (x.__doc__,))
-        try:    docstr = method.__doc__
-        except: docstr = None
-        if docstr and docstr[:10] == '__roles__:':
-            roles = [x.strip() for x in docstr[10:].strip().split(',')]
-            #self.apacheLog("roles: %s" % (roles,))
-            return self.checkRoles(roles)
-        return True
-        
-    def checkRoles(self, roles):
-        # override me
-        return True
-
-    
     
 _UseJinja2 = True
 
@@ -285,8 +277,15 @@ class PyWebApp(Primitive):
     def setJinjaGlobals(self, globals):
         self.JEnv.addGlobals(globals)
 
-    def destroy(self):
-        # override me
+    def destroy(self):                          # overridable
+        pass
+        
+    def authorized(self, request, roles):       # overridable
+        return True
+
+    def init(self, root):                       # overridable
+        # called from wsgi call right after the root handler is created,
+        # at this point, self.Request.environ is ready to be used 
         pass
 
     def find_object(self, path_to, obj, path_down):
@@ -317,12 +316,6 @@ class PyWebApp(Primitive):
         else:
             return obj, next, rest
 
-    def init(self, root):
-        # override me
-        # called from wsgi call right after the root handler is created,
-        # at this point, self.Request.environ is ready to be used 
-        pass
-  
     def applicationErrorResponse(self, headline, exc_info):
         typ, val, tb = exc_info
         exc_text = traceback.format_exception(typ, val, tb)
@@ -334,8 +327,7 @@ class PyWebApp(Primitive):
             </html>""" % (headline, exc_text)
         print exc_text
         return Response(text, status = '500 Application Error')
-    
-    
+
     def wsgi_call(self, environ, start_response):
         req = Request(environ)
         self.initOnce(req)
