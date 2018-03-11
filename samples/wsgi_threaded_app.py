@@ -1,4 +1,4 @@
-from wsgi_py import atomic, WSGIApp, WSGIHandler, Application, run_server, Response
+from webpie import atomic, WSGIApp, WSGIHandler, Application, run_server, Response
 import time
 
 request_count = 0

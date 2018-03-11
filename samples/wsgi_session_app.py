@@ -1,4 +1,4 @@
-from wsgi_py import WSGISessionApp, WSGIHandler, Application, run_server, Response
+from webpie import WSGISessionApp, WSGIHandler, Application, run_server, Response
 
 class MyApp(WSGISessionApp):
     pass

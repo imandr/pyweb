@@ -1,4 +1,4 @@
-from wsgi_py import WSGIApp, WSGIHandler, Application, run_server, Response
+from webpie import WSGIApp, WSGIHandler, Application, run_server, Response
 
 class MyApp(WSGIApp):
     pass
@@ -10,6 +10,8 @@ class MyHandler(WSGIHandler):
             "%s = %s\n" % (k, v) for k, v in request.environ.items()
             )
         return Response(app_iter = resp_lines, content_type="text/plain")
+        
+    index = env
         
 app = Application(MyApp, MyHandler)
 
