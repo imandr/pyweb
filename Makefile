@@ -3,7 +3,7 @@ TAR_DIR = /tmp/$(USER)
 TAR_FILE = $(TAR_DIR)/webpie_$(VERSION).tar
 
 all:
-	make VERSION=`python pythreader/Version.py` all_with_version_defined
+	make VERSION=`python webpie/Version.py` all_with_version_defined
 	
 clean:
 	rm -rf $(BUILD_DIR) $(TAR_FILE)
