@@ -1,18 +1,10 @@
 from .webob import Response
 from .webob import Request as webob_request
-import webob, traceback, sys
 from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
+    
 import os.path, os, stat
 from threading import RLock
-
-_interlock = RLock()
-
-def atomic(func):
-    def new_func(*params, **args):
-        with _interlock:
-            return func(*params, **args)
-    return new_func
-        
+import webob, traceback, sys
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -44,9 +36,17 @@ class HTTPResponseException(Exception):
     def __init__(self, response):
         self.value = response
 
+def synchronized(method):
+    def new_method(self, *params, **args):
+        if isinstance(self, WSGIHandler):
+            with self.App._Lock:
+                return method(self, *params, **args)
+        else:
+            with self._Lock:
+                return method(self, *params, **args)
+    return new_method
 
 
-    
 class WSGIHandler:
 
     MIME_TYPES_BASE = {
@@ -62,14 +62,15 @@ class WSGIHandler:
     def __init__(self, request, app, path = None):
         self.App = app
         self.Request = request
-        self.MyPath = path
+        self.Path = path
         self.BeingDestroyed = False
         self.AppURI = self.App.ScriptName
         self.AppURL = request.application_url
         #print "Handler created"
 
-    def setPath(self, path):
-        self.MyPath = path
+    def initAtPath(self, path):
+        # override me
+        pass
 
     def myUri(self, down=None):
         #ret = "%s/%s" % (self.AppURI,self.MyPath)
@@ -78,15 +79,112 @@ class WSGIHandler:
             ret = "%s/%s" % (ret, down)
         return ret
 
+    def find_object(self, path_to, obj, path_down):
+        #print 'find_object(%s, %s)' % (path_to, path_down)
+        path_down = path_down.lstrip('/')
+        #print 'find_object(%s, %s)' % (path_to, path_down)
+        if not path_down:
+            # We've arrived, but method is empty
+            return obj, 'index', ''
+        parts = path_down.split('/', 1)
+        next = parts[0]
+        if len(parts) == 1:
+            rest = ''
+        else:
+            rest = parts[1]
+        # Hide private methods/attributes:
+        assert not next.startswith('_')
+        # Now we get the attribute; getattr(a, 'b') is equivalent
+        # to a.b...
+        next_obj = getattr(obj, next)
+        if isinstance(next_obj, WSGIHandler):
+            if path_to and path_to[-1] != '/':
+                path_to += '/'
+            path_to += next
+            return self.find_object(path_to, next_obj, rest)
+        else:
+            return obj, next, rest
+
+    def wsgi_call(self, environ, start_response):
+        #print 'wsgi_call...'
+        path_to = '/'
+        path_down = environ.get('PATH_INFO', '')
+        #print 'path:', path_down
+        req = Request(environ)
+        try:
+            #print 'find_object..'
+            obj, method, relpath = self.find_object(path_to, self, path_down)
+        except AttributeError:
+            resp = Response("Invalid path %s" % (path_down,), 
+                            status = '500 Bad request')
+        except AssertionError:
+            resp = Response('Attempt to access private method',
+                    status = '500 Bad request')
+        else:
+            m = getattr(obj, method)
+            if not self._checkPermissions(m):
+                resp = Response('Authorization required',
+                    status = '403 Forbidden')
+            else:
+                dict = {}
+                for k in req.str_GET.keys():
+                    v = req.str_GET.getall(k)
+                    if type(v) == type([]) and len(v) == 1:
+                        v = v[0]
+                    dict[k] = v
+                try:
+                    #print 'calling method: ',m
+                    resp = m(req, relpath, **dict)
+                    #print resp
+                except HTTPException, val:
+                    #print 'caught:', type(val), val
+                    resp = val
+                except HTTPResponseException, val:
+                    #print 'caught:', type(val), val
+                    resp = val
+                except:
+                    resp = self.applicationErrorResponse(
+                        "Uncaught exception", sys.exc_info())
+                if resp == None:
+                    resp = req.getResponse()
+        self.destroy()
+        self._destroy()
+        out = resp(environ, start_response)
+        return out
+
+    def hello(self, req, relpath):
+        resp = Response("Hello")
+        return resp
+       
+    def env(self, req, relpath):
+        return Response(app_iter = [
+            "%s = %s\n" % (k, repr(v)) for k, v in sorted(req.environ.items())
+        ], content_type="text/plain")
+
+    def _checkPermissions(self, x):
+        #self.apacheLog("doc: %s" % (x.__doc__,))
+        try:    docstr = x.__doc__
+        except: docstr = None
+        if docstr and docstr[:10] == '__roles__:':
+            roles = [x.strip() for x in docstr[10:].strip().split(',')]
+            #self.apacheLog("roles: %s" % (roles,))
+            return self.checkRoles(roles)
+        return True
+        
+    def checkRoles(self, roles):
+        # override me
+        return True
+
     def static(self, req, rel_path, **args):
-        rel_path = rel_path.replace("..",".")
+        while ".." in rel_path:
+            rel_path = rel_path.replace("..",".")
         home = self.App.ScriptHome
         path = os.path.join(home, "static", rel_path)
         try:
             st_mode = os.stat(path).st_mode
             if not stat.S_ISREG(st_mode):
                 #print "not a regular file"
-                raise ValueError("Not regular file")
+                raise ValueError("Not a regular file")
         except:
             #raise
             return Response("Not found", status=404)
@@ -115,10 +213,6 @@ class WSGIHandler:
                 o._destroy()
         self.BeingDestroyed = False
         
-    def hello(self, req, relpath):
-        resp = Response("Hello")
-        return resp
-       
     def destroy(self):
         # override me
         pass
@@ -197,114 +291,40 @@ class WSGIHandler:
             lines.append("%s = %s\n" % (k, req.environ[k]))
         return Response(app_iter = lines, content_type = "text/plain")
     
-_UseJinja2 = True
-
-try:
-    import jinja2
-except:
-    _UseJinja2 = False
-
-
 class WSGIApp:
 
     Version = "Undefined"
 
-    def __init__(self, request, root_class):
+    def __init__(self, root_class):
         self.RootClass = root_class
-        self.Request = request
         self.JEnv = None
-        self.ScriptName = None
+        self._Lock = RLock()
+    
+    @synchronized
+    def initJinjaEnvironment(self, tempdirs = [], filters = {}, globals = {}):
+        # to be called by subclass
+        #print "initJinja2(%s)" % (tempdirs,)
+        from jinja2 import Environment, FileSystemLoader
+        if type(tempdirs) != type([]):
+            tempdirs = [tempdirs]
+        self.JEnv = Environment(
+            loader=FileSystemLoader(tempdirs)
+            )
+        for n, f in filters.items():
+            self.JEnv.filters[n] = f
         self.JGlobals = {}
-        self.Script = request.environ.get('SCRIPT_FILENAME', 
-            os.environ.get('UWSGI_SCRIPT_FILENAME'))
-        self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
-        #for k in sorted(request.environ.keys()):
-        #    print ("%s = %s" % (k, request.environ[k]))
-        if self.ScriptHome and _UseJinja2:
-            # default Jinja2 templates search path:
-            # 1. where the App script is
-            # 2. templates subdirectory
-            self.initJinja2(tempdirs = [
-                self.ScriptHome, 
-                os.path.join(self.ScriptHome, 'templates')
-                ])
-
+        self.JGlobals.update(globals)
+                
+    @synchronized
     def setJinjaFilters(self, filters):
             for n, f in filters.items():
                 self.JEnv.filters[n] = f
 
+    @synchronized
     def setJinjaGlobals(self, globals):
             self.JGlobals = {}
             self.JGlobals.update(globals)
-
-    def initJinja2(self, tempdirs = [], filters = {}, globals = {}):
-        # to be called by subclass
-        #print "initJinja2(%s)" % (tempdirs,)
-        if _UseJinja2:
-            from jinja2 import Environment, FileSystemLoader
-            if type(tempdirs) != type([]):
-                tempdirs = [tempdirs]
-            self.JEnv = Environment(
-                loader=FileSystemLoader(tempdirs)
-                )
-            for n, f in filters.items():
-                self.JEnv.filters[n] = f
-            self.JGlobals = {}
-            self.JGlobals.update(globals)
-                
         
-    def destroy(self):
-        # override me
-        pass
-
-    def find_object(self, path_to, obj, path_down):
-        #print 'find_object(%s, %s)' % (path_to, path_down)
-        path_down = path_down.lstrip('/')
-        #print 'find_object(%s, %s)' % (path_to, path_down)
-        obj.setPath(path_to)
-        obj.initAtPath(path_to)
-        if not path_down:
-            # We've arrived, but method is empty
-            return obj, 'index', ''
-        parts = path_down.split('/', 1)
-        next = parts[0]
-        if len(parts) == 1:
-            rest = ''
-        else:
-            rest = parts[1]
-        # Hide private methods/attributes:
-        assert not next.startswith('_')
-        # Now we get the attribute; getattr(a, 'b') is equivalent
-        # to a.b...
-        next_obj = getattr(obj, next)
-        if isinstance(next_obj, WSGIHandler):
-            if path_to and path_to[-1] != '/':
-                path_to += '/'
-            path_to += next
-            return self.find_object(path_to, next_obj, rest)
-        else:
-            return obj, next, rest
-
-    def init(self, root):
-        # override me
-        # called from wsgi call right after the root handler is created,
-        # at this point, self.Request.environ is ready to be used 
-        pass
-  
-    def _checkPermissions(self, x):
-        #self.apacheLog("doc: %s" % (x.__doc__,))
-        try:    docstr = x.__doc__
-        except: docstr = None
-        if docstr and docstr[:10] == '__roles__:':
-            roles = [x.strip() for x in docstr[10:].strip().split(',')]
-            #self.apacheLog("roles: %s" % (roles,))
-            return self.checkRoles(roles)
-        return True
-        
-    def checkRoles(self, roles):
-        # override me
-        return True
-
     def applicationErrorResponse(self, headline, exc_info):
         typ, val, tb = exc_info
         exc_text = traceback.format_exception(typ, val, tb)
@@ -314,66 +334,28 @@ class WSGIApp:
             <pre>%s</pre>
             </body>
             </html>""" % (headline, exc_text)
-        print exc_text
+        #print exc_text
         return Response(text, status = '500 Application Error')
     
     
-    def wsgi_call(self, environ, start_response):
-        #print 'wsgi_call...'
+    def __call__(self, environ, start_response):
+        #print 'app call ...'
         path_to = '/'
         path_down = environ.get('PATH_INFO', '')
         #print 'path:', path_down
+        req = Request(environ)
         self.ScriptName = environ.get('SCRIPT_NAME','')
-        req = self.Request
-        root = self.RootClass(req, self)
-        #print 'root created'
-        self.init(root)
-        #print 'initialized'
+        self.Script = environ.get('SCRIPT_FILENAME', 
+                    os.environ.get('UWSGI_SCRIPT_FILENAME'))
+        self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
+        root = self.RootClass(req, self, "/")
         try:
-            #print 'find_object..'
-            obj, method, relpath = self.find_object(path_to, root, path_down)
-        except AttributeError:
-            resp = Response("Invalid path %s" % (path_down,), 
-                            status = '500 Bad request')
-        except AssertionError:
-            resp = Response('Attempt to access private method',
-                    status = '500 Bad request')
-        else:
-            m = getattr(obj, method)
-            if not self._checkPermissions(m):
-                resp = Response('Authorization required',
-                    status = '403 Forbidden')
-            else:
-                dict = {}
-                for k in req.str_GET.keys():
-                    v = req.str_GET.getall(k)
-                    if type(v) == type([]) and len(v) == 1:
-                        v = v[0]
-                    dict[k] = v
-                try:
-                    #print 'calling method: ',m
-                    resp = m(req, relpath, **dict)
-                    #print resp
-                except HTTPException, val:
-                    #print 'caught:', type(val), val
-                    resp = val
-                except HTTPResponseException, val:
-                    #print 'caught:', type(val), val
-                    resp = val
-                except:
-                    resp = self.applicationErrorResponse(
-                        "Uncaught exception", sys.exc_info())
-                if resp == None:
-                    resp = req.getResponse()
-        out = resp(environ, start_response)
-        root._destroy()
-        self.destroy()
-        #print out
-        return out
+            return root.wsgi_call(environ, start_response)
+        except:
+            resp = self.applicationErrorResponse(
+                "Uncaught exception", sys.exc_info())
+            return resp(environ, start_response)
         
-    def __call__(self, environ, start_response):
-        return self.wsgi_call(environ, start_response)
-            
     def JinjaGlobals(self):
         # override me
         return {}
@@ -410,31 +392,16 @@ class WSGIApp:
         return os.path.dirname(self.scriptUri())
         
 
-            
-def Application(appclass, handlerclass, *params, **args):
-    def app_function(environ, start_response):
-        #print "app_function: appclass=%s, handlerclass=%s" % (appclass, handlerclass)
-        request = Request(environ)
-        app = appclass(request, handlerclass, *params, **args)
-        return app(environ, start_response)
-    return app_function
-
-        
 if __name__ == '__main__':
-    from .HTTPServer import HTTPServer
+    from HTTPServer import HTTPServer
     
     class MyApp(WSGIApp):
         pass
         
     class MyHandler(WSGIHandler):
-    
-        def env(self, request, relpath, **args):
-            resp_lines = (
-                "%s = %s\n" % (k, v) for k, v in request.environ.items()
-                )
-            return Response(app_iter = resp_lines, content_type="text/plain")
+        pass
             
-    app = Application(MyApp, MyHandler)
+    app = MyApp(MyHandler)
     hs = HTTPServer(8001, "*", app)
     hs.start()
     hs.join()
