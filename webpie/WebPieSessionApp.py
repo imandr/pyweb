@@ -1,6 +1,6 @@
 from .webob import Response, Request
 import time, os, pickle, logging, sys
-from .WSGIApp import WSGIApp
+from .WebPieApp import WebPieApp
 from threading import Thread, RLock
 import glob
 
@@ -502,13 +502,13 @@ class Session:
         self.Changed = True
         return out
     
-class WSGISessionApp(WSGIApp):
+class WebPieSessionApp(WebPieApp):
 
     def __init__(self, request, root_class,
             session_storage = "/tmp", cookie_name = 'wsgi_py_session_id',
             domain = None, cookie_path = None,  session_timeout = 3600  # seconds
         ):
-        WSGIApp.__init__(self, request, root_class)
+        WebPieApp.__init__(self, request, root_class)
         self.SessionStorage = session_storage
         self.CookieName = cookie_name
         self.CookieDomain = domain
@@ -527,7 +527,7 @@ class WSGISessionApp(WSGIApp):
         #
         # get session id from cookie
         # load session data
-        # call the WSGIApp
+        # call the WebPieApp
         # store session data
         # add cookie
         #
@@ -570,8 +570,8 @@ class WSGISessionApp(WSGIApp):
                 list(headers) + [("Set-Cookie", str(cookie))]
             )
 
-        #print "Calling WSGIApp, request: %s %s" % (environ.get("REQUEST_METHOD"), environ.get("REQUEST_URI"))
-        output = WSGIApp.__call__(self, environ, my_start_response)
+        #print "Calling WebPieApp, request: %s %s" % (environ.get("REQUEST_METHOD"), environ.get("REQUEST_URI"))
+        output = WebPieApp.__call__(self, environ, my_start_response)
         #print "Changed: %s" % (self.Session.Changed,)
         self.Session.saveIfChanged()
         return output

@@ -1,9 +1,9 @@
-from webpie import WSGISessionApp, WSGIHandler, Application, run_server, Response
+from webpie import WebPieSessionApp, WebPieHandler, Application, run_server, Response
 
-class MyApp(WSGISessionApp):
+class MyApp(WebPieSessionApp):
     pass
     
-class MyHandler(WSGIHandler):
+class MyHandler(WebPieHandler):
 
     def set(self, request, relpath, name=None, value=None):
         self.App.session[name] = value

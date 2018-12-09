@@ -1,15 +1,15 @@
-from webpie import WSGIApp, WSGIHandler, run_server, Response
+from webpie import WebPieApp, WebPieHandler, run_server, Response
 
-class MyApp(WSGIApp):
+class MyApp(WebPieApp):
     pass
     
-class SubHandler(WSGIHandler):
+class SubHandler(WebPieHandler):
     pass
     
-class TopHandler(WSGIHandler):
+class TopHandler(WebPieHandler):
     
     def __init__(self, request, app, path):
-        WSGIHandler.__init__(self, request, app, path)
+        WebPieHandler.__init__(self, request, app, path)
         self.A = SubHandler(request, app, "/A")
     
 app = MyApp(TopHandler)

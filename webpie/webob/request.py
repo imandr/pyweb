@@ -11,19 +11,19 @@ except ImportError:
     import json
 import warnings
 
-from webob.acceptparse import (
+from .acceptparse import (
     accept_charset_property,
     accept_encoding_property,
     accept_language_property,
     accept_property,
     )
 
-from webob.cachecontrol import (
+from .cachecontrol import (
     CacheControl,
     serialize_cache_control,
     )
 
-from webob.compat import (
+from .compat import (
     PY2,
     bytes_,
     native_,
@@ -38,9 +38,9 @@ from webob.compat import (
     cgi_FieldStorage
     )
 
-from webob.cookies import RequestCookies
+from .cookies import RequestCookies
 
-from webob.descriptors import (
+from .descriptors import (
     CHARSET_RE,
     SCHEME_RE,
     converter,
@@ -58,16 +58,16 @@ from webob.descriptors import (
     upath_property,
     )
 
-from webob.etag import (
+from .etag import (
     IfRange,
     AnyETag,
     NoETag,
     etag_property,
     )
 
-from webob.headers import EnvironHeaders
+from .headers import EnvironHeaders
 
-from webob.multidict import (
+from .multidict import (
     NestedMultiDict,
     MultiDict,
     NoVars,

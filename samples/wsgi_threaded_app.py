@@ -1,13 +1,13 @@
-from webpie import synchronized, WSGIApp, WSGIHandler, run_server, Response
+from webpie import synchronized, WebPieApp, WebPieHandler, run_server, Response
 import time
 
-class MyApp(WSGIApp):
+class MyApp(WebPieApp):
     
     def __init__(self, root_class):
-        WSGIApp.__init__(self, root_class)
+        WebPieApp.__init__(self, root_class)
         self.Count = 0
         
-class MyHandler(WSGIHandler):
+class MyHandler(WebPieHandler):
 
     @synchronized
     def hello(self, request, relpath, t=3):

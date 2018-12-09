@@ -1,9 +1,9 @@
 import mimetypes
 import os
 
-from webob import exc
-from webob.dec import wsgify
-from webob.response import Response
+from . import exc
+from .dec import wsgify
+from .response import Response
 
 __all__ = [
     'FileApp', 'DirectoryApp',

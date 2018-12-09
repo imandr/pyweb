@@ -11,8 +11,8 @@ from webob.compat import (
     text_type,
     )
 
-from webob.request import Request
-from webob.exc import HTTPException
+from .request import Request
+from .exc import HTTPException
 
 __all__ = ['wsgify']
 

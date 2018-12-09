@@ -38,7 +38,7 @@ class HTTPResponseException(Exception):
 
 def synchronized(method):
     def new_method(self, *params, **args):
-        if isinstance(self, WSGIHandler):
+        if isinstance(self, WebPieHandler):
             with self.App._Lock:
                 return method(self, *params, **args)
         else:
@@ -47,7 +47,7 @@ def synchronized(method):
     return new_method
 
 
-class WSGIHandler:
+class WebPieHandler:
 
     MIME_TYPES_BASE = {
         "gif":   "image/gif",
@@ -97,7 +97,7 @@ class WSGIHandler:
         # Now we get the attribute; getattr(a, 'b') is equivalent
         # to a.b...
         next_obj = getattr(obj, next)
-        if isinstance(next_obj, WSGIHandler):
+        if isinstance(next_obj, WebPieHandler):
             if path_to and path_to[-1] != '/':
                 path_to += '/'
             path_to += next
@@ -127,8 +127,8 @@ class WSGIHandler:
                     status = '403 Forbidden')
             else:
                 dict = {}
-                for k in req.str_GET.keys():
-                    v = req.str_GET.getall(k)
+                for k in req.GET.keys():
+                    v = req.GET.getall(k)
                     if type(v) == type([]) and len(v) == 1:
                         v = v[0]
                     dict[k] = v
@@ -207,7 +207,7 @@ class WSGIHandler:
         self.BeingDestroyed = True
         for k in self.__dict__:
             o = self.__dict__[k]
-            if isinstance(o, WSGIHandler):
+            if isinstance(o, WebPieHandler):
                 try:    o.destroy()
                 except: pass
                 o._destroy()
@@ -291,7 +291,7 @@ class WSGIHandler:
             lines.append("%s = %s\n" % (k, req.environ[k]))
         return Response(app_iter = lines, content_type = "text/plain")
     
-class WSGIApp:
+class WebPieApp:
 
     Version = "Undefined"
 
@@ -395,10 +395,10 @@ class WSGIApp:
 if __name__ == '__main__':
     from HTTPServer import HTTPServer
     
-    class MyApp(WSGIApp):
+    class MyApp(WebPieApp):
         pass
         
-    class MyHandler(WSGIHandler):
+    class MyHandler(WebPieHandler):
         pass
             
     app = MyApp(MyHandler)

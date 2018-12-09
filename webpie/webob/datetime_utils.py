@@ -15,7 +15,7 @@ from email.utils import (
 
 import time
 
-from webob.compat import (
+from .compat import (
     integer_types,
     long,
     native_,

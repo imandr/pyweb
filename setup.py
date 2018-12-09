@@ -23,7 +23,7 @@ setup(
     license = "BSD 3-clause",
     keywords = "web service, wsgi, web application",
     url = "https://github.com/imandr/webpie",
-    packages=['webpie', 'samples'],
+    packages=['webpie', 'samples', 'webpie/webob'],
     long_description=read('README'),
     classifiers=[
         "Operating System :: POSIX",

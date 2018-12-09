@@ -5,10 +5,10 @@ try:
     import httplib
 except ImportError:
     import http.client as httplib
-from webob.compat import url_quote
+from .compat import url_quote
 import socket
-from webob import exc
-from webob.compat import PY2
+from . import exc
+from .compat import PY2
 
 __all__ = ['send_request_app', 'SendRequest']
 
