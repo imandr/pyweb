@@ -1,18 +1,17 @@
 """
 Represents the Cache-Control header
 """
+
 import re
+from .util import sorted
+
 
 class UpdateDict(dict):
     """
-    Dict that has a callback on all updates
+        Dict that has a callback on all updates
     """
-    # these are declared as class attributes so that
-    # we don't need to override constructor just to
-    # set some defaults
     updated = None
     updated_args = None
-
     def _updated(self):
         """
         Assign to new_dict.updated to track updates
@@ -23,44 +22,35 @@ class UpdateDict(dict):
             if args is None:
                 args = (self,)
             updated(*args)
-
     def __setitem__(self, key, item):
         dict.__setitem__(self, key, item)
         self._updated()
-
     def __delitem__(self, key):
         dict.__delitem__(self, key)
         self._updated()
-
     def clear(self):
         dict.clear(self)
         self._updated()
-
     def update(self, *args, **kw):
         dict.update(self, *args, **kw)
         self._updated()
-
-    def setdefault(self, key, value=None):
-        val = dict.setdefault(self, key, value)
-        if val is value:
-            self._updated()
-        return val
-
-    def pop(self, *args):
-        v = dict.pop(self, *args)
+    def setdefault(self, key, failobj=None):
+        dict.setdefault(self, key, failobj)
+        self._updated()
+    def pop(self):
+        v = dict.pop(self)
         self._updated()
         return v
-
     def popitem(self):
         v = dict.popitem(self)
         self._updated()
         return v
 
 
+
 token_re = re.compile(
     r'([a-zA-Z][a-zA-Z_-]*)\s*(?:=(?:"([^"]*)"|([^ \t",;]*)))?')
 need_quote_re = re.compile(r'[^a-zA-Z0-9._-]')
-
 
 class exists_property(object):
     """
@@ -75,23 +65,18 @@ class exists_property(object):
         if obj is None:
             return self
         return self.prop in obj.properties
-
     def __set__(self, obj, value):
         if (self.type is not None
             and self.type != obj.type):
             raise AttributeError(
-                "The property %s only applies to %s Cache-Control" % (
-                    self.prop, self.type))
-
+                "The property %s only applies to %s Cache-Control" % (self.prop, self.type))
         if value:
             obj.properties[self.prop] = None
         else:
             if self.prop in obj.properties:
                 del obj.properties[self.prop]
-
     def __delete__(self, obj):
         self.__set__(obj, False)
-
 
 class value_property(object):
     """
@@ -104,7 +89,6 @@ class value_property(object):
         self.default = default
         self.none = none
         self.type = type
-
     def __get__(self, obj, type=None):
         if obj is None:
             return self
@@ -116,13 +100,11 @@ class value_property(object):
                 return value
         else:
             return self.default
-
     def __set__(self, obj, value):
         if (self.type is not None
             and self.type != obj.type):
             raise AttributeError(
-                "The property %s only applies to %s Cache-Control" % (
-                    self.prop, self.type))
+                "The property %s only applies to %s Cache-Control" % (self.prop, self.type))
         if value == self.default:
             if self.prop in obj.properties:
                 del obj.properties[self.prop]
@@ -130,11 +112,9 @@ class value_property(object):
             obj.properties[self.prop] = None # Empty value, but present
         else:
             obj.properties[self.prop] = value
-
     def __delete__(self, obj):
         if self.prop in obj.properties:
             del obj.properties[self.prop]
-
 
 class CacheControl(object):
 
@@ -146,13 +126,11 @@ class CacheControl(object):
     only apply to requests or responses).
     """
 
-    update_dict = UpdateDict
-
     def __init__(self, properties, type):
         self.properties = properties
         self.type = type
 
-    @classmethod
+    #@classmethod
     def parse(cls, header, updates_to=None, type=None):
         """
         Parse the header, returning a CacheControl object.
@@ -161,7 +139,7 @@ class CacheControl(object):
         ``updates_to``, if that is given.
         """
         if updates_to:
-            props = cls.update_dict()
+            props = UpdateDict()
             props.updated = updates_to
         else:
             props = {}
@@ -178,6 +156,8 @@ class CacheControl(object):
         if updates_to:
             props.updated_args = (obj,)
         return obj
+
+    parse = classmethod(parse)
 
     def __repr__(self):
         return '<CacheControl %r>' % str(self)
@@ -202,9 +182,6 @@ class CacheControl(object):
     max_age = value_property('max-age', none=-1)
     s_maxage = value_property('s-maxage', type='response')
     s_max_age = s_maxage
-    stale_while_revalidate = value_property(
-        'stale-while-revalidate', type='response')
-    stale_if_error = value_property('stale-if-error', type='response')
 
     def __str__(self):
         return serialize_cache_control(self.properties)
@@ -214,7 +191,6 @@ class CacheControl(object):
         Returns a copy of this object.
         """
         return self.__class__(self.properties.copy(), type=self.type)
-
 
 def serialize_cache_control(properties):
     if isinstance(properties, CacheControl):
@@ -229,3 +205,4 @@ def serialize_cache_control(properties):
             value = '"%s"' % value
         parts.append('%s=%s' % (name, value))
     return ', '.join(parts)
+

@@ -1,9 +1,5 @@
-from webob.compat import (
-    MutableMapping,
-    iteritems_,
-    string_types,
-    )
-from webob.multidict import MultiDict
+from .multidict import MultiDict
+from .util import reversed, DictMixin
 
 __all__ = ['ResponseHeaders', 'EnvironHeaders']
 
@@ -21,24 +17,31 @@ class ResponseHeaders(MultiDict):
 
     def getall(self, key):
         key = key.lower()
-        return [v for (k, v) in self._items if k.lower() == key]
+        result = []
+        for k, v in self._items:
+            if k.lower() == key:
+                result.append(v)
+        return result
 
     def mixed(self):
         r = self.dict_of_lists()
-        for key, val in iteritems_(r):
+        for key, val in r.iteritems():
             if len(val) == 1:
                 r[key] = val[0]
         return r
 
     def dict_of_lists(self):
         r = {}
-        for key, val in iteritems_(self):
+        for key, val in self.iteritems():
             r.setdefault(key.lower(), []).append(val)
         return r
 
     def __setitem__(self, key, value):
         norm_key = key.lower()
-        self._items[:] = [(k, v) for (k, v) in self._items if k.lower() != norm_key]
+        items = self._items
+        for i in range(len(items)-1, -1, -1):
+            if items[i][0].lower() == norm_key:
+                del items[i]
         self._items.append((key, value))
 
     def __delitem__(self, key):
@@ -71,8 +74,8 @@ class ResponseHeaders(MultiDict):
 
     def pop(self, key, *args):
         if len(args) > 1:
-            raise TypeError("pop expected at most 2 arguments, got %s"
-                              % repr(1 + len(args)))
+            raise TypeError, "pop expected at most 2 arguments, got "\
+                              + repr(1 + len(args))
         key = key.lower()
         for i in range(len(self._items)):
             if self._items[i][0].lower() == key:
@@ -99,7 +102,7 @@ key2header = {
 header2key = dict([(v.upper(),k) for (k,v) in key2header.items()])
 
 def _trans_key(key):
-    if not isinstance(key, string_types):
+    if not isinstance(key, basestring):
         return None
     elif key in key2header:
         return key2header[key]
@@ -114,7 +117,7 @@ def _trans_name(name):
         return header2key[name]
     return 'HTTP_'+name.replace('-', '_')
 
-class EnvironHeaders(MutableMapping):
+class EnvironHeaders(DictMixin):
     """An object that represents the headers as present in a
     WSGI environment.
 
@@ -142,10 +145,3 @@ class EnvironHeaders(MutableMapping):
 
     def __contains__(self, hname):
         return _trans_name(hname) in self.environ
-
-    def __len__(self):
-        return len(list(self.keys()))
-
-    def __iter__(self):
-        for k in self.keys():
-            yield k

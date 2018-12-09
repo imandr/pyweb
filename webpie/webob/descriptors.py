@@ -1,46 +1,136 @@
-import warnings
-import re, textwrap
-from datetime import datetime, date
+import re
 
-from .byterange import Range, ContentRange
-from .etag import IfRange, NoIfRange
-from .datetime_utils import parse_date, serialize_date
-from .util import rfc_reference
+from datetime import (
+    date,
+    datetime,
+    )
+
+from collections import namedtuple
+
+from webob.byterange import (
+    ContentRange,
+    Range,
+    )
+
+from webob.compat import (
+    PY2,
+    text_type,
+    )
+
+from webob.datetime_utils import (
+    parse_date,
+    serialize_date,
+    )
+
+from webob.util import (
+    header_docstring,
+    warn_deprecation,
+    )
 
 
 CHARSET_RE = re.compile(r';\s*charset=([^;]*)', re.I)
-QUOTES_RE = re.compile('"(.*)"')
 SCHEME_RE = re.compile(r'^[a-z]+:', re.I)
 
 
 _not_given = object()
 
 def environ_getter(key, default=_not_given, rfc_section=None):
-    doc = "Gets and sets the %r key in the environment." % key
-    doc += rfc_reference(key, rfc_section)
+    if rfc_section:
+        doc = header_docstring(key, rfc_section)
+    else:
+        doc = "Gets and sets the ``%s`` key in the environment." % key
     if default is _not_given:
         def fget(req):
             return req.environ[key]
+        def fset(req, val):
+            req.environ[key] = val
         fdel = None
     else:
         def fget(req):
             return req.environ.get(key, default)
+        def fset(req, val):
+            if val is None:
+                if key in req.environ:
+                    del req.environ[key]
+            else:
+                req.environ[key] = val
         def fdel(req):
             del req.environ[key]
-    def fset(req, val):
-        req.environ[key] = val
     return property(fget, fset, fdel, doc=doc)
 
 
+def environ_decoder(key, default=_not_given, rfc_section=None,
+                    encattr=None):
+    if rfc_section:
+        doc = header_docstring(key, rfc_section)
+    else:
+        doc = "Gets and sets the ``%s`` key in the environment." % key
+    if default is _not_given:
+        def fget(req):
+            return req.encget(key, encattr=encattr)
+        def fset(req, val):
+            return req.encset(key, val, encattr=encattr)
+        fdel = None
+    else:
+        def fget(req):
+            return req.encget(key, default, encattr=encattr)
+        def fset(req, val):
+            if val is None:
+                if key in req.environ:
+                    del req.environ[key]
+            else:
+                return req.encset(key, val, encattr=encattr)
+        def fdel(req):
+            del req.environ[key]
+    return property(fget, fset, fdel, doc=doc)
+
 def upath_property(key):
-    def fget(req):
-        return req.environ[key].decode('UTF8', req.unicode_errors)
-    return property(fget, doc='upath_property(%r)' % key)
+    if PY2:
+        def fget(req):
+            encoding = req.url_encoding
+            return req.environ.get(key, '').decode(encoding)
+        def fset(req, val):
+            encoding = req.url_encoding
+            if isinstance(val, text_type):
+                val = val.encode(encoding)
+            req.environ[key] = val
+    else:
+        def fget(req):
+            encoding = req.url_encoding
+            return req.environ.get(key, '').encode('latin-1').decode(encoding)
+        def fset(req, val):
+            encoding = req.url_encoding
+            req.environ[key] = val.encode(encoding).decode('latin-1')
+
+    return property(fget, fset, doc='upath_property(%r)' % key)
+
+
+def deprecated_property(attr, name, text, version): # pragma: no cover
+    """
+    Wraps a descriptor, with a deprecation warning or error
+    """
+    def warn():
+        warn_deprecation('The attribute %s is deprecated: %s'
+            % (name, text),
+            version,
+            3
+        )
+    def fget(self):
+        warn()
+        return attr.__get__(self, type(self))
+    def fset(self, val):
+        warn()
+        attr.__set__(self, val)
+    def fdel(self):
+        warn()
+        attr.__delete__(self)
+    return property(fget, fset, fdel,
+        '<Deprecated attribute %s>' % name
+    )
 
 
 def header_getter(header, rfc_section):
-    doc = "Gets and sets and deletes the %s header." % header
-    doc += rfc_reference(header, rfc_section)
+    doc = header_docstring(header, rfc_section)
     key = header.lower()
 
     def fget(r):
@@ -51,16 +141,15 @@ def header_getter(header, rfc_section):
     def fset(r, value):
         fdel(r)
         if value is not None:
-            if isinstance(value, unicode):
-                # This is the standard encoding for headers:
-                value = value.encode('ISO-8859-1')
+            if '\n' in value or '\r' in value:
+                raise ValueError('Header value may not contain control characters')
+
+            if isinstance(value, text_type) and PY2:
+                value = value.encode('latin-1')
             r._headerlist.append((header, value))
 
     def fdel(r):
-        items = r._headerlist
-        for i in range(len(items)-1, -1, -1):
-            if items[i][0].lower() == key:
-                del items[i]
+        r._headerlist[:] = [(k, v) for (k, v) in r._headerlist if k.lower() != key]
 
     return property(fget, fset, fdel, doc)
 
@@ -69,9 +158,10 @@ def header_getter(header, rfc_section):
 
 def converter(prop, parse, serialize, convert_name=None):
     assert isinstance(prop, property)
-    convert_name = convert_name or "%r and %r" % (parse, serialize)
+    convert_name = convert_name or "``%s`` and ``%s``" % (parse.__name__,
+                                                  serialize.__name__)
     doc = prop.__doc__ or ''
-    doc += "  Converts it as a %s." % convert_name
+    doc += "  Converts it using %s." % convert_name
     hget, hset = prop.fget, prop.fset
     def fget(r):
         return parse(hget(r))
@@ -93,10 +183,8 @@ def parse_list(value):
     return tuple(filter(None, [v.strip() for v in value.split(',')]))
 
 def serialize_list(value):
-    if isinstance(value, unicode):
+    if isinstance(value, (text_type, bytes)):
         return str(value)
-    elif isinstance(value, str):
-        return value
     else:
         return ', '.join(map(str, value))
 
@@ -115,47 +203,6 @@ def date_header(header, rfc_section):
 
 
 
-class deprecated_property(object):
-    """
-    Wraps a descriptor, with a deprecation warning or error
-    """
-    def __init__(self, descriptor, attr, message, warning=True):
-        self.descriptor = descriptor
-        self.attr = attr
-        self.message = message
-        self.warning = warning
-
-    def __get__(self, obj, type=None):
-        if obj is None:
-            return self
-        self.warn()
-        return self.descriptor.__get__(obj, type)
-
-    def __set__(self, obj, value):
-        self.warn()
-        self.descriptor.__set__(obj, value)
-
-    def __delete__(self, obj):
-        self.warn()
-        self.descriptor.__delete__(obj)
-
-    def __repr__(self):
-        return '<Deprecated attribute %s: %r>' % (
-            self.attr,
-            self.descriptor)
-
-    def warn(self):
-        if not self.warning:
-            raise DeprecationWarning(
-                'The attribute %s is deprecated: %s' % (self.attr, self.message))
-        else:
-            warnings.warn(
-                'The attribute %s is deprecated: %s' % (self.attr, self.message),
-                DeprecationWarning,
-                stacklevel=3)
-
-
-
 
 
 ########################
@@ -163,34 +210,44 @@ class deprecated_property(object):
 ########################
 
 
-# FIXME: weak entity tags are not supported, would need special class
-def parse_etag_response(value):
+_rx_etag = re.compile(r'(?:^|\s)(W/)?"((?:\\"|.)*?)"')
+
+def parse_etag_response(value, strong=False):
     """
+    Parse a response ETag.
     See:
         * http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.19
         * http://www.w3.org/Protocols/rfc2616/rfc2616-sec3.html#sec3.11
     """
-    if value is not None:
-        unquote_match = QUOTES_RE.match(value)
-        if unquote_match is not None:
-            value = unquote_match.group(1)
-            value = value.replace('\\"', '"')
-        return value
-
-def serialize_etag_response(value):
-    return '"%s"' % value.replace('"', '\\"')
-
-def parse_if_range(value):
     if not value:
-        return NoIfRange
+        return None
+    m = _rx_etag.match(value)
+    if not m:
+        # this etag is invalid, but we'll just return it anyway
+        return value
+    elif strong and m.group(1):
+        # this is a weak etag and we want only strong ones
+        return None
     else:
-        return IfRange.parse(value)
+        return m.group(2).replace('\\"', '"')
+
+def serialize_etag_response(value): #return '"%s"' % value.replace('"', '\\"')
+    strong = True
+    if isinstance(value, tuple):
+        value, strong = value
+    elif _rx_etag.match(value):
+        # this is a valid etag already
+        return value
+    # let's quote the value
+    r = '"%s"' % value.replace('"', '\\"')
+    if not strong:
+        r = 'W/' + r
+    return r
 
 def serialize_if_range(value):
     if isinstance(value, (datetime, date)):
         return serialize_date(value)
-    if not isinstance(value, str):
-        value = str(value)
+    value = str(value)
     return value or None
 
 def parse_range(value):
@@ -200,16 +257,13 @@ def parse_range(value):
     return Range.parse(value)
 
 def serialize_range(value):
-    if isinstance(value, (list, tuple)):
-        if len(value) != 2:
-            raise ValueError(
-                "If setting .range to a list or tuple, it must be of length 2 (not %r)"
-                % value)
-        value = Range([value])
-    if value is None:
+    if not value:
         return None
-    value = str(value)
-    return value or None
+    elif isinstance(value, (list, tuple)):
+        return str(Range(*value))
+    else:
+        assert isinstance(value, str)
+        return value
 
 def parse_int(value):
     if value is None or value == '':
@@ -252,7 +306,7 @@ def serialize_content_range(value):
 
 
 
-_rx_auth_param = re.compile(r'([a-z]+)=(".*?"|[^,]*)(?:\Z|, *)')
+_rx_auth_param = re.compile(r'([a-z]+)[ \t]*=[ \t]*(".*?"|[^,]*?)[ \t]*(?:\Z|, *)')
 
 def parse_auth_params(params):
     r = {}
@@ -261,19 +315,22 @@ def parse_auth_params(params):
     return r
 
 # see http://lists.w3.org/Archives/Public/ietf-http-wg/2009OctDec/0297.html
-known_auth_schemes = ['Basic', 'Digest', 'WSSE', 'HMACDigest', 'GoogleLogin', 'Cookie', 'OpenID']
+known_auth_schemes = ['Basic', 'Digest', 'WSSE', 'HMACDigest', 'GoogleLogin',
+                      'Cookie', 'OpenID']
 known_auth_schemes = dict.fromkeys(known_auth_schemes, None)
+
+_authorization = namedtuple('Authorization', ['authtype', 'params'])
 
 def parse_auth(val):
     if val is not None:
-        authtype, params = val.split(' ', 1)
+        authtype, sep, params = val.partition(' ')
         if authtype in known_auth_schemes:
             if authtype == 'Basic' and '"' not in params:
                 # this is the "Authentication: Basic XXXXX==" case
                 pass
             else:
                 params = parse_auth_params(params)
-        return authtype, params
+        return _authorization(authtype, params)
     return val
 
 def serialize_auth(val):

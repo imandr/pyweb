@@ -4,31 +4,36 @@ Does parsing of ETag-related headers: If-None-Matches, If-Matches
 Also If-Range parsing
 """
 
-from .datetime_utils import *
-from .util import rfc_reference
+from webob.datetime_utils import (
+    parse_date,
+    serialize_date,
+    )
+from webob.descriptors import _rx_etag
+from webob.util import header_docstring
 
-__all__ = ['AnyETag', 'NoETag', 'ETagMatcher', 'IfRange', 'NoIfRange', 'etag_property']
+__all__ = ['AnyETag', 'NoETag', 'ETagMatcher', 'IfRange', 'etag_property']
 
 
-def etag_property(key, default, rfc_section):
-    doc = "Gets and sets the %r key in the environment." % key
-    doc += rfc_reference(key, rfc_section)
+def etag_property(key, default, rfc_section, strong=True):
+    doc = header_docstring(key, rfc_section)
     doc += "  Converts it as a Etag."
+
     def fget(req):
         value = req.environ.get(key)
         if not value:
             return default
-        elif value == '*':
-            return AnyETag
         else:
-            return ETagMatcher.parse(value)
+            return ETagMatcher.parse(value, strong=strong)
+
     def fset(req, val):
         if val is None:
             req.environ[key] = None
         else:
             req.environ[key] = str(val)
+
     def fdel(req):
         del req.environ[key]
+
     return property(fget, fset, fdel, doc=doc)
 
 
@@ -43,16 +48,17 @@ class _AnyETag(object):
     def __nonzero__(self):
         return False
 
-    def __contains__(self, other):
-        return True
+    __bool__ = __nonzero__  # python 3
 
-    def weak_match(self, other):
+    def __contains__(self, other):
         return True
 
     def __str__(self):
         return '*'
 
+
 AnyETag = _AnyETag()
+
 
 class _NoETag(object):
     """
@@ -65,176 +71,102 @@ class _NoETag(object):
     def __nonzero__(self):
         return False
 
-    def __contains__(self, other):
-        return False
+    __bool__ = __nonzero__  # python 3
 
-    def weak_match(self, other):
+    def __contains__(self, other):
         return False
 
     def __str__(self):
         return ''
 
+
 NoETag = _NoETag()
 
+
+# TODO: convert into a simple tuple
+
 class ETagMatcher(object):
-
-    """
-    Represents an ETag request.  Supports containment to see if an
-    ETag matches.  You can also use
-    ``etag_matcher.weak_contains(etag)`` to allow weak ETags to match
-    (allowable for conditional GET requests, but not ranges or other
-    methods).
-    """
-
-    def __init__(self, etags, weak_etags=()):
+    def __init__(self, etags):
         self.etags = etags
-        self.weak_etags = weak_etags
 
     def __contains__(self, other):
-        return other in self.etags or other in self.weak_etags
-
-    def weak_match(self, other):
-        if other.lower().startswith('w/'):
-            other = other[2:]
-        return other in self.etags or other in self.weak_etags
+        return other in self.etags
 
     def __repr__(self):
-        return '<ETag %s>' % (
-            ' or '.join(self.etags))
+        return '<ETag %s>' % (' or '.join(self.etags))
 
-    def parse(cls, value):
+    @classmethod
+    def parse(cls, value, strong=True):
         """
         Parse this from a header value
         """
-        results = []
-        weak_results = []
-        while value:
-            if value.lower().startswith('w/'):
-                # Next item is weak
-                weak = True
-                value = value[2:]
-            else:
-                weak = False
-            if value.startswith('"'):
-                try:
-                    etag, rest = value[1:].split('"', 1)
-                except ValueError:
-                    etag = value.strip(' ",')
-                    rest = ''
-                else:
-                    rest = rest.strip(', ')
-            else:
-                if ',' in value:
-                    etag, rest = value.split(',', 1)
-                    rest = rest.strip()
-                else:
-                    etag = value
-                    rest = ''
-            if etag == '*':
-                return AnyETag
-            if etag:
-                if weak:
-                    weak_results.append(etag)
-                else:
-                    results.append(etag)
-            value = rest
-        return cls(results, weak_results)
-    parse = classmethod(parse)
+        if value == '*':
+            return AnyETag
+        if not value:
+            return cls([])
+        matches = _rx_etag.findall(value)
+        if not matches:
+            return cls([value])
+        elif strong:
+            return cls([t for w, t in matches if not w])
+        else:
+            return cls([t for w, t in matches])
 
     def __str__(self):
-        # FIXME: should I quote these?
-        items = list(self.etags)
-        for weak in self.weak_etags:
-            items.append('W/%s' % weak)
-        return ', '.join(items)
+        return ', '.join(map('"%s"'.__mod__, self.etags))
+
 
 class IfRange(object):
-    """
-    Parses and represents the If-Range header, which can be
-    an ETag *or* a date
-    """
-    def __init__(self, etag=None, date=None):
+    def __init__(self, etag):
         self.etag = etag
-        self.date = date
 
-    def __repr__(self):
-        if self.etag is None:
-            etag = '*'
-        else:
-            etag = str(self.etag)
-        if self.date is None:
-            date = '*'
-        else:
-            date = serialize_date(self.date)
-        return '<%s etag=%s, date=%s>' % (
-            self.__class__.__name__,
-            etag, date)
-
-    def __str__(self):
-        if self.etag is not None:
-            return str(self.etag)
-        elif self.date:
-            return serialize_date(self.date)
-        else:
-            return ''
-
-    def match(self, etag=None, last_modified=None):
-        """
-        Return True if the If-Range header matches the given etag or last_modified
-        """
-        if self.date is not None:
-            if last_modified is None:
-                # Conditional with nothing to base the condition won't work
-                return False
-            return last_modified <= self.date
-        elif self.etag is not None:
-            if not etag:
-                return False
-            return etag in self.etag
-        return True
-
-    def match_response(self, response):
-        """
-        Return True if this matches the given ``webob.Response`` instance.
-        """
-        return self.match(etag=response.etag, last_modified=response.last_modified)
-
-    #@classmethod
+    @classmethod
     def parse(cls, value):
         """
         Parse this from a header value.
         """
-        date = etag = None
         if not value:
-            etag = NoETag()
-        elif value and value.endswith(' GMT'):
+            return cls(AnyETag)
+        elif value.endswith(' GMT'):
             # Must be a date
-            date = parse_date(value)
+            return IfRangeDate(parse_date(value))
         else:
-            etag = ETagMatcher.parse(value)
-        return cls(etag=etag, date=date)
-    parse = classmethod(parse)
+            return cls(ETagMatcher.parse(value))
 
-class _NoIfRange(object):
-    """
-    Represents a missing If-Range header
-    """
-
-    def __repr__(self):
-        return '<Empty If-Range>'
-
-    def __str__(self):
-        return ''
+    def __contains__(self, resp):
+        """
+        Return True if the If-Range header matches the given etag or last_modified
+        """
+        return resp.etag_strong in self.etag
 
     def __nonzero__(self):
-        return False
+        return bool(self.etag)
 
-    def match(self, etag=None, last_modified=None):
-        return True
+    def __repr__(self):
+        return '%s(%r)' % (
+            self.__class__.__name__,
+            self.etag
+        )
 
-    def match_response(self, response):
-        return True
+    def __str__(self):
+        return str(self.etag) if self.etag else ''
 
-NoIfRange = _NoIfRange()
+    __bool__ = __nonzero__  # python 3
 
 
+class IfRangeDate(object):
+    def __init__(self, date):
+        self.date = date
+
+    def __contains__(self, resp):
+        last_modified = resp.last_modified
+        return last_modified and (last_modified <= self.date)
+
+    def __repr__(self):
+        return '%s(%r)' % (
+            self.__class__.__name__,
+            self.date
+        )
+
+    def __str__(self):
+        return serialize_date(self.date)

@@ -1,35 +1,14 @@
-import calendar
-
-from datetime import (
-    date,
-    datetime,
-    timedelta,
-    tzinfo,
-    )
-
-from email.utils import (
-    formatdate,
-    mktime_tz,
-    parsedate_tz,
-    )
-
 import time
-
-from webob.compat import (
-    integer_types,
-    long,
-    native_,
-    text_type,
-    )
+import calendar
+from datetime import datetime, date, timedelta, tzinfo
+from rfc822 import parsedate_tz, mktime_tz, formatdate
 
 __all__ = [
     'UTC', 'timedelta_to_seconds',
     'year', 'month', 'week', 'day', 'hour', 'minute', 'second',
-    'parse_date', 'serialize_date',
+    'parse_date', 'serialize_date', 'serialize_cookie_date',
     'parse_date_delta', 'serialize_date_delta',
 ]
-
-_now = datetime.now # hook point for unit tests
 
 class _UTC(tzinfo):
     def dst(self, dt):
@@ -64,10 +43,6 @@ year = timedelta(days=365)
 def parse_date(value):
     if not value:
         return None
-    try:
-        value = native_(value)
-    except:
-        return None
     t = parsedate_tz(value)
     if t is None:
         # Could not parse
@@ -79,21 +54,34 @@ def parse_date(value):
     return datetime.fromtimestamp(t, UTC)
 
 def serialize_date(dt):
-    if isinstance(dt, (bytes, text_type)):
-        return native_(dt)
+    if isinstance(dt, unicode):
+        dt = dt.encode('ascii')
+    if isinstance(dt, str):
+        return dt
     if isinstance(dt, timedelta):
-        dt = _now() + dt
+        dt = datetime.now() + dt
     if isinstance(dt, (datetime, date)):
         dt = dt.timetuple()
     if isinstance(dt, (tuple, time.struct_time)):
         dt = calendar.timegm(dt)
-    if not (isinstance(dt, float) or isinstance(dt, integer_types)):
+    if not isinstance(dt, (float, int, long)):
         raise ValueError(
-            "You must pass in a datetime, date, time tuple, or integer object, "
-            "not %r" % dt)
-    return formatdate(dt, usegmt=True)
+            "You must pass in a datetime, date, time tuple, or integer object, not %r" % dt)
+    return formatdate(dt)
 
 
+weekdays = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
+months = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+def serialize_cookie_date(dt):
+    if isinstance(dt, unicode):
+        dt = dt.encode('ascii')
+    if isinstance(dt, timedelta):
+        dt = datetime.now() + dt
+    if isinstance(dt, (datetime, date)):
+        dt = dt.timetuple()
+    r = time.strftime('%%s, %d-%%s-%Y %H:%M:%S GMT', dt)
+    return r % (weekdays[dt[6]], months[dt[1]-1])
 
 def parse_date_delta(value):
     """
@@ -106,11 +94,13 @@ def parse_date_delta(value):
     except ValueError:
         return parse_date(value)
     else:
-        return _now() + timedelta(seconds=value)
+        delta = timedelta(seconds=value)
+        return datetime.now() + delta
 
 
 def serialize_date_delta(value):
-    if isinstance(value, (float, int, long)):
+    if isinstance(value, (float, int)):
         return str(int(value))
     else:
         return serialize_date(value)
+

@@ -1,43 +1,47 @@
-# (c) 2005 Ian Bicking and contributors; written for Paste (http://pythonpaste.org)
-# Licensed under the MIT license: http://www.opensource.org/licenses/mit-license.php
+# (c) 2005 Ian Bicking and contributors; written for Paste
+# (http://pythonpaste.org) Licensed under the MIT license:
+# http://www.opensource.org/licenses/mit-license.php
 """
 Gives a multi-value dictionary object (MultiDict) plus several wrappers
 """
-import cgi
-import copy
-import sys
+import binascii
+import warnings
 
-from .util import DictMixin, reversed
+from webob.compat import (
+    MutableMapping,
+    PY2,
+    iteritems_,
+    itervalues_,
+    url_encode,
+    )
 
+__all__ = ['MultiDict', 'NestedMultiDict', 'NoVars', 'GetDict']
 
-__all__ = ['MultiDict', 'UnicodeMultiDict', 'NestedMultiDict', 'NoVars',
-           'TrackableMultiDict']
-
-class MultiDict(DictMixin):
+class MultiDict(MutableMapping):
     """
         An ordered dictionary that can have multiple values for each key.
-        Adds the methods getall, getone, mixed, and add to the normal
+        Adds the methods getall, getone, mixed and extend and add to the normal
         dictionary interface.
     """
 
     def __init__(self, *args, **kw):
         if len(args) > 1:
-            raise TypeError(
-                "MultiDict can only be called with one positional argument")
+            raise TypeError("MultiDict can only be called with one positional "
+                            "argument")
         if args:
             if hasattr(args[0], 'iteritems'):
                 items = list(args[0].iteritems())
             elif hasattr(args[0], 'items'):
-                items = args[0].items()
+                items = list(args[0].items())
             else:
                 items = list(args[0])
             self._items = items
         else:
             self._items = []
         if kw:
-            self._items.extend(kw.iteritems())
+            self._items.extend(kw.items())
 
-    #@classmethod
+    @classmethod
     def view_list(cls, lst):
         """
         Create a dict that is a view on the given list
@@ -50,9 +54,7 @@ class MultiDict(DictMixin):
         obj._items = lst
         return obj
 
-    view_list = classmethod(view_list)
-
-    #@classmethod
+    @classmethod
     def from_fieldstorage(cls, fs):
         """
         Create a dict from a cgi.FieldStorage instance
@@ -60,13 +62,34 @@ class MultiDict(DictMixin):
         obj = cls()
         # fs.list can be None when there's nothing to parse
         for field in fs.list or ():
+            charset = field.type_options.get('charset', 'utf8')
+            transfer_encoding = field.headers.get('Content-Transfer-Encoding', None)
+            supported_transfer_encoding = {
+                'base64' : binascii.a2b_base64,
+                'quoted-printable' : binascii.a2b_qp
+                }
+            if not PY2:
+                if charset == 'utf8':
+                    decode = lambda b: b
+                else:
+                    decode = lambda b: b.encode('utf8').decode(charset)
+            else:
+                decode = lambda b: b.decode(charset)
             if field.filename:
+                field.filename = decode(field.filename)
                 obj.add(field.name, field)
             else:
-                obj.add(field.name, field.value)
+                value = field.value
+                if transfer_encoding in supported_transfer_encoding:
+                    if not PY2:
+                        # binascii accepts bytes
+                        value = value.encode('utf8')
+                    value = supported_transfer_encoding[transfer_encoding](value)
+                    if not PY2:
+                        # binascii returns bytes
+                        value = value.decode('utf8')
+                obj.add(field.name, decode(value))
         return obj
-
-    from_fieldstorage = classmethod(from_fieldstorage)
 
     def __getitem__(self, key):
         for k, v in reversed(self._items):
@@ -91,11 +114,7 @@ class MultiDict(DictMixin):
         """
         Return a list of all values matching the key (may be an empty list)
         """
-        result = []
-        for k, v in self._items:
-            if key == k:
-                result.append(v)
-        return result
+        return [v for k, v in self._items if k == key]
 
     def getone(self, key):
         """
@@ -119,7 +138,7 @@ class MultiDict(DictMixin):
         """
         result = {}
         multi = {}
-        for key, value in self.iteritems():
+        for key, value in self.items():
             if key in result:
                 # We do this to not clobber any lists that are
                 # *actual* values in this dictionary:
@@ -137,7 +156,7 @@ class MultiDict(DictMixin):
         Returns a dictionary where each key is associated with a list of values.
         """
         r = {}
-        for key, val in self.iteritems():
+        for key, val in self.items():
             r.setdefault(key, []).append(val)
         return r
 
@@ -160,7 +179,7 @@ class MultiDict(DictMixin):
     has_key = __contains__
 
     def clear(self):
-        self._items = []
+        del self._items[:]
 
     def copy(self):
         return self.__class__(self)
@@ -174,8 +193,8 @@ class MultiDict(DictMixin):
 
     def pop(self, key, *args):
         if len(args) > 1:
-            raise TypeError, "pop expected at most 2 arguments, got "\
-                              + repr(1 + len(args))
+            raise TypeError("pop expected at most 2 arguments, got %s"
+                             % repr(1 + len(args)))
         for i in range(len(self._items)):
             if self._items[i][0] == key:
                 v = self._items[i][1]
@@ -189,7 +208,19 @@ class MultiDict(DictMixin):
     def popitem(self):
         return self._items.pop()
 
-    def update(self, other=None, **kwargs):
+    def update(self, *args, **kw):
+        if args:
+            lst = args[0]
+            if len(lst) != len(dict(lst)):
+                # this does not catch the cases where we overwrite existing
+                # keys, but those would produce too many warning
+                msg = ("Behavior of MultiDict.update() has changed "
+                    "and overwrites duplicate keys. Consider using .extend()"
+                )
+                warnings.warn(msg, UserWarning, stacklevel=2)
+        MutableMapping.update(self, *args, **kw)
+
+    def extend(self, other=None, **kwargs):
         if other is None:
             pass
         elif hasattr(other, 'items'):
@@ -204,8 +235,8 @@ class MultiDict(DictMixin):
             self.update(kwargs)
 
     def __repr__(self):
-        items = ', '.join(['(%r, %r)' % v for v in self.iteritems()])
-        return '%s([%s])' % (self.__class__.__name__, items)
+        items = map('(%r, %r)'.__mod__, _hide_passwd(self.items()))
+        return '%s([%s])' % (self.__class__.__name__, ', '.join(items))
 
     def __len__(self):
         return len(self._items)
@@ -214,248 +245,85 @@ class MultiDict(DictMixin):
     ## All the iteration:
     ##
 
-    def keys(self):
-        return [k for k, v in self._items]
-
     def iterkeys(self):
         for k, v in self._items:
             yield k
+    if PY2:
+        def keys(self):
+            return [k for k, v in self._items]
+    else:
+        keys = iterkeys
 
     __iter__ = iterkeys
-
-    def items(self):
-        return self._items[:]
 
     def iteritems(self):
         return iter(self._items)
 
-    def values(self):
-        return [v for k, v in self._items]
+    if PY2:
+        def items(self):
+            return self._items[:]
+    else:
+        items = iteritems
 
     def itervalues(self):
         for k, v in self._items:
             yield v
 
-class UnicodeMultiDict(DictMixin):
-    """
-    A MultiDict wrapper that decodes returned values to unicode on the
-    fly. Decoding is not applied to assigned values.
-
-    The key/value contents are assumed to be ``str``/``strs`` or
-    ``str``/``FieldStorages`` (as is returned by the ``paste.request.parse_``
-    functions).
-
-    Can optionally also decode keys when the ``decode_keys`` argument is
-    True.
-
-    ``FieldStorage`` instances are cloned, and the clone's ``filename``
-    variable is decoded. Its ``name`` variable is decoded when ``decode_keys``
-    is enabled.
-
-    """
-    def __init__(self, multi=None, encoding=None, errors='strict',
-                 decode_keys=False):
-        self.multi = multi
-        if encoding is None:
-            encoding = sys.getdefaultencoding()
-        self.encoding = encoding
-        self.errors = errors
-        self.decode_keys = decode_keys
-
-    def _decode_key(self, key):
-        if self.decode_keys:
-            try:
-                key = key.decode(self.encoding, self.errors)
-            except AttributeError:
-                pass
-        return key
-
-    def _encode_key(self, key):
-        if self.decode_keys and isinstance(key, unicode):
-            return key.encode(self.encoding, self.errors)
-        return key
-
-    def _decode_value(self, value):
-        """
-        Decode the specified value to unicode. Assumes value is a ``str`` or
-        `FieldStorage`` object.
-
-        ``FieldStorage`` objects are specially handled.
-        """
-        if isinstance(value, cgi.FieldStorage):
-            # decode FieldStorage's field name and filename
-            value = copy.copy(value)
-            if self.decode_keys:
-                value.name = value.name.decode(self.encoding, self.errors)
-            if value.filename:
-                value.filename = value.filename.decode(self.encoding,
-                                                       self.errors)
-        elif not isinstance(value, unicode):
-            try:
-                value = value.decode(self.encoding, self.errors)
-            except AttributeError:
-                pass
-        return value
-
-    def _encode_value(self, value):
-        # FIXME: should this do the FieldStorage stuff too?
-        if isinstance(value, unicode):
-            value = value.encode(self.encoding, self.errors)
-        return value
-
-    def __getitem__(self, key):
-        return self._decode_value(self.multi.__getitem__(self._encode_key(key)))
-
-    def __setitem__(self, key, value):
-        self.multi.__setitem__(self._encode_key(key), self._encode_value(value))
-
-    def add(self, key, value):
-        """
-        Add the key and value, not overwriting any previous value.
-        """
-        self.multi.add(self._encode_key(key), self._encode_value(value))
-
-    def getall(self, key):
-        """
-        Return a list of all values matching the key (may be an empty list)
-        """
-        return [self._decode_value(v) for v in self.multi.getall(self._encode_key(key))]
-
-    def getone(self, key):
-        """
-        Get one value matching the key, raising a KeyError if multiple
-        values were found.
-        """
-        return self._decode_value(self.multi.getone(self._encode_key(key)))
-
-    def mixed(self):
-        """
-        Returns a dictionary where the values are either single
-        values, or a list of values when a key/value appears more than
-        once in this dictionary.  This is similar to the kind of
-        dictionary often used to represent the variables in a web
-        request.
-        """
-        unicode_mixed = {}
-        for key, value in self.multi.mixed().iteritems():
-            if isinstance(value, list):
-                value = [self._decode_value(value) for value in value]
-            else:
-                value = self._decode_value(value)
-            unicode_mixed[self._decode_key(key)] = value
-        return unicode_mixed
-
-    def dict_of_lists(self):
-        """
-        Returns a dictionary where each key is associated with a
-        list of values.
-        """
-        unicode_dict = {}
-        for key, value in self.multi.dict_of_lists().iteritems():
-            value = [self._decode_value(value) for value in value]
-            unicode_dict[self._decode_key(key)] = value
-        return unicode_dict
-
-    def __delitem__(self, key):
-        self.multi.__delitem__(self._encode_key(key))
-
-    def __contains__(self, key):
-        return self.multi.__contains__(self._encode_key(key))
-
-    has_key = __contains__
-
-    def clear(self):
-        self.multi.clear()
-
-    def copy(self):
-        return UnicodeMultiDict(self.multi.copy(), self.encoding, self.errors)
-
-    def setdefault(self, key, default=None):
-        return self._decode_value(self.multi.setdefault(self._encode_key(key), self._encode_value(default)))
-
-    def pop(self, key, *args):
-        return self._decode_value(self.multi.pop(self._encode_key(key), *args))
-
-    def popitem(self):
-        k, v = self.multi.popitem()
-        return (self._decode_key(k), self._decode_value(v))
-
-    def __repr__(self):
-        items = ', '.join(['(%r, %r)' % v for v in self.items()])
-        return '%s([%s])' % (self.__class__.__name__, items)
-
-    def __len__(self):
-        return self.multi.__len__()
-
-    ##
-    ## All the iteration:
-    ##
-
-    def keys(self):
-        return [self._decode_key(k) for k in self.multi.iterkeys()]
-
-    def iterkeys(self):
-        for k in self.multi.iterkeys():
-            yield self._decode_key(k)
-
-    __iter__ = iterkeys
-
-    def items(self):
-        return [(self._decode_key(k), self._decode_value(v))
-                for k, v in self.multi.iteritems()]
-
-    def iteritems(self):
-        for k, v in self.multi.iteritems():
-            yield (self._decode_key(k), self._decode_value(v))
-
-    def values(self):
-        return [self._decode_value(v) for v in self.multi.itervalues()]
-
-    def itervalues(self):
-        for v in self.multi.itervalues():
-            yield self._decode_value(v)
+    if PY2:
+        def values(self):
+            return [v for k, v in self._items]
+    else:
+        values = itervalues
 
 _dummy = object()
 
-class TrackableMultiDict(MultiDict):
-    tracker = None
-    name = None
-    def __init__(self, *args, **kw):
-        if '__tracker' in kw:
-            self.tracker = kw.pop('__tracker')
-        if '__name' in kw:
-            self.name = kw.pop('__name')
-        MultiDict.__init__(self, *args, **kw)
+class GetDict(MultiDict):
+#     def __init__(self, data, tracker, encoding, errors):
+#         d = lambda b: b.decode(encoding, errors)
+#         data = [(d(k), d(v)) for k,v in data]
+    def __init__(self, data, env):
+        self.env = env
+        MultiDict.__init__(self, data)
+    def on_change(self):
+        e = lambda t: t.encode('utf8')
+        data = [(e(k), e(v)) for k,v in self.items()]
+        qs = url_encode(data)
+        self.env['QUERY_STRING'] = qs
+        self.env['webob._parsed_query_vars'] = (self, qs)
     def __setitem__(self, key, value):
         MultiDict.__setitem__(self, key, value)
-        self.tracker(self, key, value)
+        self.on_change()
     def add(self, key, value):
         MultiDict.add(self, key, value)
-        self.tracker(self, key, value)
+        self.on_change()
     def __delitem__(self, key):
         MultiDict.__delitem__(self, key)
-        self.tracker(self, key)
+        self.on_change()
     def clear(self):
         MultiDict.clear(self)
-        self.tracker(self)
+        self.on_change()
     def setdefault(self, key, default=None):
         result = MultiDict.setdefault(self, key, default)
-        self.tracker(self, key, result)
+        self.on_change()
         return result
     def pop(self, key, *args):
         result = MultiDict.pop(self, key, *args)
-        self.tracker(self, key)
+        self.on_change()
         return result
     def popitem(self):
         result = MultiDict.popitem(self)
-        self.tracker(self)
+        self.on_change()
         return result
-    def update(self, other=None, **kwargs):
-        MultiDict.update(self, other, **kwargs)
-        self.tracker(self)
+    def update(self, *args, **kwargs):
+        MultiDict.update(self, *args, **kwargs)
+        self.on_change()
+    def extend(self, *args, **kwargs):
+        MultiDict.extend(self, *args, **kwargs)
+        self.on_change()
     def __repr__(self):
-        items = ', '.join(['(%r, %r)' % v for v in self.iteritems()])
-        return '%s([%s])' % (self.name or self.__class__.__name__, items)
+        items = map('(%r, %r)'.__mod__, _hide_passwd(self.items()))
+        # TODO: GET -> GetDict
+        return 'GET([%s])' % (', '.join(items))
     def copy(self):
         # Copies shouldn't be tracked
         return MultiDict(self)
@@ -520,24 +388,25 @@ class NestedMultiDict(MultiDict):
                 return True
         return False
 
-    def items(self):
-        return list(self.iteritems())
-
     def iteritems(self):
         for d in self.dicts:
-            for item in d.iteritems():
+            for item in iteritems_(d):
                 yield item
-
-    def values(self):
-        return list(self.itervalues())
+    if PY2:
+        def items(self):
+            return list(self.iteritems())
+    else:
+        items = iteritems
 
     def itervalues(self):
         for d in self.dicts:
-            for value in d.itervalues():
+            for value in itervalues_(d):
                 yield value
-
-    def keys(self):
-        return list(self.iterkeys())
+    if PY2:
+        def values(self):
+            return list(self.itervalues())
+    else:
+        values = itervalues
 
     def __iter__(self):
         for d in self.dicts:
@@ -545,6 +414,12 @@ class NestedMultiDict(MultiDict):
                 yield key
 
     iterkeys = __iter__
+
+    if PY2:
+        def keys(self):
+            return list(self.iterkeys())
+    else:
+        keys = iterkeys
 
 class NoVars(object):
     """
@@ -600,15 +475,32 @@ class NoVars(object):
     def __len__(self):
         return 0
 
-    def __cmp__(self, other):
-        return cmp({}, other)
-
-    def keys(self):
-        return []
     def iterkeys(self):
         return iter([])
+
+    if PY2:
+        def __cmp__(self, other):
+            return cmp({}, other)
+
+        def keys(self):
+            return []
+        items = keys
+        values = keys
+        itervalues = iterkeys
+        iteritems = iterkeys
+    else:
+        keys = iterkeys
+        items = iterkeys
+        values = iterkeys
+
     __iter__ = iterkeys
-    items = keys
-    iteritems = iterkeys
-    values = keys
-    itervalues = iterkeys
+
+def _hide_passwd(items):
+    for k, v in items:
+        if ('password' in k
+            or 'passwd' in k
+            or 'pwd' in k
+        ):
+            yield k, '******'
+        else:
+            yield k, v
