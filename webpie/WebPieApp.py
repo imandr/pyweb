@@ -4,11 +4,10 @@ from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
     
 import os.path, os, stat
 from threading import RLock
-import webob, traceback, sys
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
-        webob.Request.__init__(self, *agrs, **kv)
+        webob_request.__init__(self, *agrs, **kv)
         self.args = self.environ['QUERY_STRING']
         self._response = Response()
         
@@ -36,7 +35,7 @@ class HTTPResponseException(Exception):
     def __init__(self, response):
         self.value = response
 
-def synchronized(method):
+def atomic(method):
     def new_method(self, *params, **args):
         if isinstance(self, WebPieHandler):
             with self.App._Lock:
@@ -300,7 +299,7 @@ class WebPieApp:
         self.JEnv = None
         self._Lock = RLock()
     
-    @synchronized
+    @atomic
     def initJinjaEnvironment(self, tempdirs = [], filters = {}, globals = {}):
         # to be called by subclass
         #print "initJinja2(%s)" % (tempdirs,)
@@ -315,12 +314,12 @@ class WebPieApp:
         self.JGlobals = {}
         self.JGlobals.update(globals)
                 
-    @synchronized
+    @atomic
     def setJinjaFilters(self, filters):
             for n, f in filters.items():
                 self.JEnv.filters[n] = f
 
-    @synchronized
+    @atomic
     def setJinjaGlobals(self, globals):
             self.JGlobals = {}
             self.JGlobals.update(globals)
