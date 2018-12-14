@@ -37,12 +37,8 @@ class HTTPResponseException(Exception):
 
 def atomic(method):
     def new_method(self, *params, **args):
-        if isinstance(self, WebPieHandler):
-            with self.App._Lock:
-                return method(self, *params, **args)
-        else:
-            with self._Lock:
-                return method(self, *params, **args)
+        with self._lock:
+		return method(self, *params, **args)
     return new_method
 
 
@@ -66,6 +62,10 @@ class WebPieHandler:
         self.AppURI = self.App.ScriptName
         self.AppURL = request.application_url
         #print "Handler created"
+
+    @property
+    def _lock(self):
+	return self.App._lock
 
     def initAtPath(self, path):
         # override me
@@ -298,6 +298,10 @@ class WebPieApp:
         self.RootClass = root_class
         self.JEnv = None
         self._Lock = RLock()
+
+    @property
+    def _lock(self):
+	return self._Lock
     
     @atomic
     def initJinjaEnvironment(self, tempdirs = [], filters = {}, globals = {}):
