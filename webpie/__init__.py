@@ -1,4 +1,4 @@
-from .WebPieApp import (WebPieApp, WebPieHandler, Response, atomic)
+from .WebPieApp import (WebPieApp, WebPieHandler, Response, app_synchronized)
 from .WebPieSessionApp import (WebPieSessionApp,)
 from .HTTPServer import (HTTPServer, run_server)
 

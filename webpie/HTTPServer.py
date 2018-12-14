@@ -1,6 +1,6 @@
 import fnmatch, traceback, sys, select
 from socket import *
-from .MyThread import MyThread, synchronized
+from pythreader import PyThread, synchronized
 
 class InputStream:
     
@@ -21,12 +21,12 @@ class InputStream:
             out += w
         return out
 
-class HTTPConnection(MyThread):
+class HTTPConnection(PyThread):
 
     MAXMSG = 100000
 
     def __init__(self, server, csock, caddr):
-        MyThread.__init__(self)
+        PyThread.__init__(self)
         self.Server = server
         self.CAddr = caddr
         self.CSock = csock
@@ -230,10 +230,10 @@ class HTTPConnection(MyThread):
                 self.shutdown()     # noting else to send
     
 
-class HTTPServer(MyThread):
+class HTTPServer(PyThread):
 
     def __init__(self, port, app, url_pattern="*", max_connections = 100, enabled = True):
-        MyThread.__init__(self)
+        PyThread.__init__(self)
         #self.debug("Server started")
         self.Port = port
         self.WSGIApp = app

@@ -2,7 +2,7 @@ from .webob import Response
 from .webob import Request as webob_request
 from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
     
-import os.path, os, stat
+import os.path, os, stat, sys, traceback
 from threading import RLock
 
 class Request(webob_request):
@@ -35,14 +35,16 @@ class HTTPResponseException(Exception):
     def __init__(self, response):
         self.value = response
 
-def atomic(method):
-    def atomic_method(self, *params, **args):
-        with self._lock:
-		return method(self, *params, **args)
-    return atomic_method
+def app_synchronized(method):
+    def synchronized_method(self, *params, **args):
+        with self._app_lock():
+            return method(self, *params, **args)
+    return synchronized_method
 
 
 class WebPieHandler:
+
+    Version = ""
 
     MIME_TYPES_BASE = {
         "gif":   "image/gif",
@@ -59,13 +61,11 @@ class WebPieHandler:
         self.Request = request
         self.Path = path
         self.BeingDestroyed = False
-        self.AppURI = self.App.ScriptName
         self.AppURL = request.application_url
         #print "Handler created"
 
-    @property
-    def _lock(self):
-	return self.App._lock
+    def _app_lock(self):
+        return self.App._app_lock()
 
     def initAtPath(self, path):
         # override me
@@ -142,7 +142,7 @@ class WebPieHandler:
                     #print 'caught:', type(val), val
                     resp = val
                 except:
-                    resp = self.applicationErrorResponse(
+                    resp = self.App.applicationErrorResponse(
                         "Uncaught exception", sys.exc_info())
                 if resp == None:
                     resp = req.getResponse()
@@ -220,22 +220,26 @@ class WebPieHandler:
         # override me
         pass
 
-    def render_to_string(self, temp, **args):
-        params = {
-            'APP_URI':  self.AppURI,
+    def addEnvironment(self, d):
+        params = {  
             'APP_URL':  self.AppURL,
-            'MY_PATH':  self.MyPath
+            'MY_PATH':  self.Path,
+            "GLOBAL_AppTopPath":    self.scriptUri(),
+            "GLOBAL_AppDirPath":    self.uriDir(),
+            "GLOBAL_ImagesPath":    self.uriDir()+"/images",
+            "GLOBAL_AppVersion":    self.Version,
+            "GLOBAL_AppObject":     self,
             }
-        params.update(args)
+        params = self.App.addEnvironment(params)
+        params.update(d)
+        return params
+
+    def render_to_string(self, temp, **args):
+        params = self.addEnvironment(args)
         return self.App.render_to_string(temp, **params)
 
     def render_to_iterator(self, temp, **args):
-        params = {
-            'APP_URI':  self.AppURI,
-            'APP_URL':  self.AppURL,
-            'MY_PATH':  self.MyPath
-            }
-        params.update(args)
+        params = self.addEnvironment(args)
         #print 'render_to_iterator:', params
         return self.App.render_to_iterator(temp, **params)
 
@@ -271,11 +275,14 @@ class WebPieHandler:
         return self.App.getSessionData()
         
         
-    def scriptUri(self):
-        return self.App.scriptUri()
-       
-    def uriDir(self):
-        return self.App.uriDir()
+    def scriptUri(self, ignored=None):
+        return self.Request.environ.get('SCRIPT_NAME',
+                os.environ.get('SCRIPT_NAME', '')
+        )
+        
+    def uriDir(self, ignored=None):
+        return os.path.dirname(self.scriptUri())
+        
 
     def renderTemplate(self, ignored, template, _dict = {}, **args):
         # backward compatibility method
@@ -297,18 +304,17 @@ class WebPieApp:
     def __init__(self, root_class):
         self.RootClass = root_class
         self.JEnv = None
-        self._Lock = RLock()
+        self._AppLock = RLock()
 
-    @property
-    def _lock(self):
-	return self._Lock
+    def _app_lock(self):
+        return self._AppLock
     
-    @atomic
+    @app_synchronized
     def initJinjaEnvironment(self, tempdirs = [], filters = {}, globals = {}):
         # to be called by subclass
         #print "initJinja2(%s)" % (tempdirs,)
         from jinja2 import Environment, FileSystemLoader
-        if type(tempdirs) != type([]):
+        if not isinstance(tempdirs, list):
             tempdirs = [tempdirs]
         self.JEnv = Environment(
             loader=FileSystemLoader(tempdirs)
@@ -318,12 +324,12 @@ class WebPieApp:
         self.JGlobals = {}
         self.JGlobals.update(globals)
                 
-    @atomic
+    @app_synchronized
     def setJinjaFilters(self, filters):
             for n, f in filters.items():
                 self.JEnv.filters[n] = f
 
-    @atomic
+    @app_synchronized
     def setJinjaGlobals(self, globals):
             self.JGlobals = {}
             self.JGlobals.update(globals)
@@ -339,8 +345,7 @@ class WebPieApp:
             </html>""" % (headline, exc_text)
         #print exc_text
         return Response(text, status = '500 Application Error')
-    
-    
+
     def __call__(self, environ, start_response):
         #print 'app call ...'
         path_to = '/'
@@ -364,19 +369,12 @@ class WebPieApp:
         return {}
 
     def addEnvironment(self, d):
-        params = {  
-            "GLOBAL_AppTopPath":    self.scriptUri(),
-            "GLOBAL_AppDirPath":    self.uriDir(),
-            "GLOBAL_ImagesPath":    self.uriDir()+"/images",
-            "GLOBAL_AppVersion":    self.Version,
-            "GLOBAL_AppObject":     self,
-            }
+        params = {}
         params.update(self.JGlobals)
         params.update(self.JinjaGlobals())
         params.update(d)
-        #print params
         return params
-
+        
     def render_to_string(self, temp, **kv):
         t = self.JEnv.get_template(temp)
         return t.render(self.addEnvironment(kv))
@@ -385,16 +383,6 @@ class WebPieApp:
         t = self.JEnv.get_template(temp)
         return t.generate(self.addEnvironment(kv))
         
-    # backward compatibility
-    def scriptUri(self, ignored=None):
-        return self.Request.environ.get('SCRIPT_NAME',
-                os.environ.get('SCRIPT_NAME', '')
-        )
-        
-    def uriDir(self, ignored=None):
-        return os.path.dirname(self.scriptUri())
-        
-
 if __name__ == '__main__':
     from HTTPServer import HTTPServer
     
