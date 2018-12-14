@@ -36,10 +36,10 @@ class HTTPResponseException(Exception):
         self.value = response
 
 def atomic(method):
-    def new_method(self, *params, **args):
+    def atomic_method(self, *params, **args):
         with self._lock:
 		return method(self, *params, **args)
-    return new_method
+    return atomic_method
 
 
 class WebPieHandler:
