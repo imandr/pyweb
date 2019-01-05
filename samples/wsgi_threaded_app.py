@@ -1,4 +1,4 @@
-from webpie import synchronized, WebPieApp, WebPieHandler, run_server, Response
+from webpie import atomic, WebPieApp, WebPieHandler, run_server, Response
 import time
 
 class MyApp(WebPieApp):
@@ -9,7 +9,7 @@ class MyApp(WebPieApp):
         
 class MyHandler(WebPieHandler):
 
-    @synchronized
+    @atomic
     def hello(self, request, relpath, t=3):
         c = self.App.Count
         t = int(t)
