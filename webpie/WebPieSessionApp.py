@@ -2,7 +2,26 @@ from .webob import Response, Request
 import time, os, pickle, logging, sys
 from .WebPieApp import WebPieApp
 from threading import Thread, RLock
-import glob
+import glob, uuid, hashlib
+
+_hash_algorithm = None
+
+def random_string():
+    global _hash_algorithm
+    alg = _hash_algorithm
+    if alg is None:
+        prefered = ['sha256', 'sha224', 'sha384', 'sha512', 'md5']
+        for a in prefered:
+            if a in hashlib.algorithms_available:
+                _hash_algorithm = alg = a
+                break
+        else:
+            raise ValueError("Can not find hash algorithm")
+    h = hashlib.new(alg)
+    h.update("%f" % (time.time(),))
+    h.update(uuid.uuid1().hex)
+    return h.hexdigest()
+        
 
 # Cookie module stolen from pesto
 # Copyright (c) 2007-2010 Oliver Cope. All rights reserved.
@@ -217,29 +236,6 @@ def parse_cookie_header(cookie_string, unquote=url_unquote):
             cookies[c.name] = c
     return cookies
 
-class BulkProxy:
-
-    def __init__(self, sess):
-        self.Session = sess
-        
-    def get(self, key, default=None):
-        #print "BulkProxy: reading %s" % (key,)
-        v = self.Session.bulkRead(key, default)
-        #print v
-        return v
-
-    def __getitem__(self, key):
-        v = self.get(key)
-        if v is None:
-            raise KeyError
-        return v
-
-    def __setitem__(self, key, val):
-        return self.Session.bulkSave(key, val)
-
-    def __delitem__(self, key):
-        return self.Session.bulkDelete(key)
-        
 class CleanerThread(Thread):
 
     def __init__(self, data_root,
@@ -311,7 +307,7 @@ class SessionStorage:
     def bulkFilePath(self, sid, key):
         c1 = sid[-1]
         c2 = sid[-2]
-        return "%s/%s/%s/%s:%s.data" % (self.RpptPath, c1, c2, 
+        return "%s/%s/%s/%s:%s.data" % (self.RootPath, c1, c2, 
                 sid, key)
 
     @synchronized
@@ -354,7 +350,7 @@ class SessionStorage:
 
     @synchronized
     def bulkLoad(self, sid, key, default=None):
-        return self.readData(self.bulkFilePath(sid, key))
+        return self.loadData(self.bulkFilePath(sid, key))
         
     @synchronized
     def bulkSave(self, sid, key, value):
@@ -379,6 +375,29 @@ class SessionStorage:
         except: pass
         
 
+class BulkProxy:
+
+    def __init__(self, sess):
+        self.Session = sess
+        
+    def get(self, key, default=None):
+        #print "BulkProxy: reading %s" % (key,)
+        v = self.Session.bulkRead(key, default)
+        #print v
+        return v
+
+    def __getitem__(self, key):
+        v = self.get(key)
+        if v is None:
+            raise KeyError(key)
+        return v
+
+    def __setitem__(self, key, val):
+        return self.Session.bulkSave(key, val)
+
+    def __delitem__(self, key):
+        return self.Session.bulkDelete(key)
+        
 class Session:
     def __init__(self, storage_path, session_id, session_timeout):
         self.Storage = SessionStorage.storage(storage_path, 
@@ -391,11 +410,6 @@ class Session:
             self.save()
         self.Changed = False
                 
-    def Data(self):
-        if self._Data is None:
-            self.load()
-        return self._Data
-        
     @staticmethod
     def is_valid_id(s):
         try:    int(s, 16)
@@ -407,8 +421,7 @@ class Session:
         return self.SessionID
         
     def generateSessionID(self):
-        t = int(time.time() * 1000.0)
-        return "%x" % (id(self) ^ t,)
+        return random_string()
         
     @property
     def data(self):
@@ -504,24 +517,16 @@ class Session:
     
 class WebPieSessionApp(WebPieApp):
 
-    def __init__(self, request, root_class,
-            session_storage = "/tmp", cookie_name = 'wsgi_py_session_id',
+    def __init__(self, root_class,
+            session_storage = "/tmp", cookie_name = 'webpie_session_id',
             domain = None, cookie_path = None,  session_timeout = 3600  # seconds
         ):
-        WebPieApp.__init__(self, request, root_class)
+        WebPieApp.__init__(self, root_class)
         self.SessionStorage = session_storage
         self.CookieName = cookie_name
         self.CookieDomain = domain
         self.CookiePath = cookie_path
         self.SessionLifetime = session_timeout
-        self.Session = None
-        
-    def getSessionData(self):
-        return self.Session
-    
-    @property
-    def session(self):
-        return self.Session
         
     def __call__(self, environ, start_response):
         #
@@ -545,9 +550,9 @@ class WebPieSessionApp(WebPieApp):
         #
         # load session data
         #
-        self.Session = Session(self.SessionStorage, session_id, 
+        session = Session(self.SessionStorage, session_id, 
                 self.SessionLifetime)
-        environ["wsgi_py.session"] = self.Session
+        environ["webpie.session"] = session
 
         def my_start_response(status, headers):
             _cookie_path = self.CookiePath
@@ -559,7 +564,7 @@ class WebPieSessionApp(WebPieApp):
             #print "_cookie_path=", _cookie_path
             cookie = Cookie(
                 self.CookieName,
-                self.Session.SessionID,
+                session.SessionID,
                 path=_cookie_path,
                 domain=self.CookieDomain,
                 http_only=True
@@ -573,7 +578,7 @@ class WebPieSessionApp(WebPieApp):
         #print "Calling WebPieApp, request: %s %s" % (environ.get("REQUEST_METHOD"), environ.get("REQUEST_URI"))
         output = WebPieApp.__call__(self, environ, my_start_response)
         #print "Changed: %s" % (self.Session.Changed,)
-        self.Session.saveIfChanged()
+        session.saveIfChanged()
         return output
         
         

@@ -143,7 +143,7 @@ class WebPieHandler:
                     #print 'caught:', type(val), val
                     resp = val
                 except:
-                    resp = self.applicationErrorResponse(
+                    resp = self.App.applicationErrorResponse(
                         "Uncaught exception", sys.exc_info())
                 if resp == None:
                     resp = req.getResponse()
@@ -290,6 +290,10 @@ class WebPieHandler:
         for k in sorted(req.environ.keys()):
             lines.append("%s = %s\n" % (k, req.environ[k]))
         return Response(app_iter = lines, content_type = "text/plain")
+    
+    @property
+    def session(self):
+        return self.Request.environ["webpie.session"]
     
 class WebPieApp:
 
