@@ -1,5 +1,6 @@
 FILES = \
-	HTTPServer.py		Version.py		WebPieSessionApp.py	\
+	HTTPServer.py		Version.py		\
+	WebPieSessionApp.py	\
 	WebPieApp.py		__init__.py
 	
 LIB_DIR = $(BUILD_DIR)/webpie
