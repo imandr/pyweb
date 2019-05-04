@@ -1,51 +1,80 @@
-import fnmatch, traceback, sys, select
+import fnmatch, traceback, sys, select, time
 from socket import *
-from pythreader import PyThread, synchronized
+from pythreader import PyThread, synchronized, Task, TaskQueue
 
-class InputStream:
-    
-    def __init__(self, lst):
-        self.Data = lst[:]
         
-    def read(self, n = -1):
-        out = ''
-        while self.Data and (n < 0 or len(out) < n):
-            w = self.Data[0]
-            if n > 0:
-                rest = n - len(out)
-                if len(w) > rest:
-                    self.Data[0] = w[rest:]
-                    w = w[:rest]
-                else:
-                    self.Data = self.Data[1:]
-            out += w
+class BodyFile(object):
+    
+    def __init__(self, buf, sock, length):
+        self.Buffer = buf
+        self.Sock = sock
+        self.Remaining = length
+        
+    def get_chunk(self, n):
+        if self.Buffer:
+            chunk = self.Buffer[0]
+            if len(chunk) > n:
+                out = chunk[:n]
+                self.Buffer[0] = chunk[n:]
+            else:
+                out = chunk
+                self.Buffer = self.Buffer[1:]
+        elif self.Sock is not None:
+            out = self.Sock.recv(n)
+            if not out: self.Sock = None
         return out
-
-class HTTPConnection(PyThread):
+        
+    MAXMSG = 100000
+    
+    def read(self, N = None):
+        #print ("read({})".format(N))
+        #print ("Buffer:", self.Buffer)
+        if N is None:   N = self.Remaining
+        out = []
+        n = 0
+        eof = False
+        while not eof and (N is None or n < N):
+            ntoread = self.MAXMSG if N is None else N - n
+            chunk = self.get_chunk(ntoread)
+            if not chunk:
+                eof = True
+            else:
+                n += len(chunk)
+                out.append(chunk)
+        out = b''.join(out)
+        if self.Remaining is not None:
+            self.Remaining -= len(out)
+        #print ("returning:[{}]".format(out))
+        return out
+            
+            
+class HTTPConnection(Task):
 
     MAXMSG = 100000
 
     def __init__(self, server, csock, caddr):
-        PyThread.__init__(self)
+        Task.__init__(self)
         self.Server = server
         self.CAddr = caddr
         self.CSock = csock
         self.ReadClosed = False
         self.Request = None
-        self.RequestBuffer = ''
+        self.RequestBuffer = ""
         self.Body = []
-        self.URL = None
         self.Headers = []
         self.HeadersDict = {}
         self.URL = None
         self.RequestMethod = None
         self.RequestReceived = False
-        self.QueryString = ''
+        self.QueryString = ""
         self.OutBuffer = []
         self.OutputEnabled = False
+        self.BodyLength = None
+        self.BytesSent = 0
+        self.ResponseStatus = None
 
     def requestReceived(self):
-        #self.debug("requestReceived:[%s]" % (self.RequestBuffer,))
+        #print("requestReceived:[%s]" % (self.RequestBuffer,))
         # parse the request
         lines = self.RequestBuffer.split('\n')
         lines = [l.strip() for l in lines if l.strip()]
@@ -77,7 +106,6 @@ class HTTPConnection(PyThread):
             if name:
                 self.Headers.append((name, value))
                 self.HeadersDict[name] = value
-        self.processRequest()
         
     def getHeader(self, header, default = None):
         # case-insensitive version of dictionary lookup
@@ -88,18 +116,35 @@ class HTTPConnection(PyThread):
         return default
         
     def addToRequest(self, data):
-        #self.debug("Add to request(%s)" % (data,))
+        #print("Add to request:", data)
         self.RequestBuffer += data
-        inx = self.RequestBuffer.find('\n\n')
-        if inx < 0: inx = self.RequestBuffer.find('\r\n\r\n')
+        inx_nn = self.RequestBuffer.find('\n\n')
+        inx_rnrn = self.RequestBuffer.find('\r\n\r\n')
+        if inx_nn < 0:
+            inx = inx_rnrn
+            n = 4
+        elif inx_rnrn < 0:
+            inx = inx_nn
+            n = 2
+        elif inx_nn < inx_rnrn:
+            inx = inx_nn
+            n = 2
+        else:
+            inx = inx_rnrn
+            n = 4
+        #print ("addToRequest: inx={}, n={}".format(inx, n))
         if inx >= 0:
-            #self.debug("End of headers found")
-            rest = self.RequestBuffer[inx+2:].lstrip()
+            rest = self.RequestBuffer[inx+n:]
             self.RequestBuffer = self.RequestBuffer[:inx]
             self.requestReceived()
-            if rest:    self.addToBody(rest)
+            #print("rest:[{}]".format(rest))
+            if rest:    
+                self.addToBody(rest)
+            self.processRequest()
             
     def addToBody(self, data):
+        if isinstance(data, str):   data = bytes(data, "utf-8")
+        #print ("addToBody:", data)
         self.Body.append(data)
 
     def parseQuery(self, query):
@@ -131,9 +176,14 @@ class HTTPConnection(PyThread):
             QUERY_STRING = self.QueryString
         )
         
-        env["wsgi.input"] = InputStream(self.Body)
+        if self.HeadersDict.get("Expect") == "100-continue":
+            self.CSock.send(b'HTTP/1.1 100-Continue\n')
+            
+        
         env["wsgi.url_scheme"] = "http"
         env["query_dict"] = self.parseQuery(self.QueryString)
+        
+        #print ("processRequest: env={}".format(env))
         
         for h, v in self.HeadersDict.items():
             h = h.lower()
@@ -145,9 +195,11 @@ class HTTPConnection(PyThread):
                 env["SERVER_NAME"] = words[0]
                 env["SERVER_PORT"] = words[1]
             elif h == "content-length": 
-                env["CONTENT_LENGTH"] = v
+                env["CONTENT_LENGTH"] = self.BodyLength = int(v)
             else:
                 env["HTTP_%s" % (h.upper().replace("-","_"),)] = v
+
+        env["wsgi.input"] = BodyFile(self.Body, self.CSock, self.BodyLength)
 
         try:    
                 #self.debug("call wsgi_app")
@@ -164,7 +216,8 @@ class HTTPConnection(PyThread):
         #self.debug("registering for writing: %s" % (self.CSock.fileno(),))    
 
     def start_response(self, status, headers):
-        #self.debug("start_response()")
+        #print("start_response({}, {})".format(status, headers))
+        self.ResponseStatus = status.split()[0]
         self.OutBuffer.append("HTTP/1.1 " + status + "\n")
         for h,v in headers:
             self.OutBuffer.append("%s: %s\n" % (h, v))
@@ -174,28 +227,36 @@ class HTTPConnection(PyThread):
         if self.ReadClosed:
             return
 
-        try:    data = self.CSock.recv(self.MAXMSG)
-        except: data = ''
+        try:    
+            data = self.CSock.recv(self.MAXMSG)
+            data = data.decode("utf-8")
+        except: 
+            data = ""
+        
+        #print("data:[{}]".format(data))
     
-        self.ReadClosed = (not data)
-
-        if not self.Request:
-            self.addToRequest(data)
+        if data:
+            if not self.Request:
+                self.addToRequest(data)
+            else:
+                self.addToBody(data)
         else:
-            self.addToBody(data)
+            self.ReadClosed = True
 
         if self.ReadClosed and not self.Request:
             self.shutdown()
                     
-    def doRead(self, fd, sel):
-        if fd == self.CSock.fileno():
-            self.doClientRead(sel)
-            
     def doWrite(self):
+        #print ("doWrite: outbuffer:", len(self.OutBuffer))
         if self.OutBuffer:
             line = self.OutBuffer[0]
-            try:    sent = self.CSock.send(line)
-            except: sent = 0
+            try:
+                if isinstance(line, str):
+                    line = bytes(line, "utf-8")
+                sent = self.CSock.send(line)
+            except: 
+                sent = 0
+            self.BytesSent += sent
             if not sent:
                 #self.debug("write socket closed")
                 self.shutdown()
@@ -208,6 +269,7 @@ class HTTPConnection(PyThread):
                     self.OutBuffer = self.OutBuffer[1:]
         
     def shutdown(self):
+            self.Server.log(self.CAddr, self.RequestMethod, self.URL, self.ResponseStatus, self.BytesSent)
             #self.debug("shutdown")
             if self.CSock != None:
                 #self.debug("closing socket")
@@ -228,22 +290,30 @@ class HTTPConnection(PyThread):
                 self.doWrite()
             if self.OutputEnabled and not self.OutBuffer:
                 self.shutdown()     # noting else to send
-    
 
 class HTTPServer(PyThread):
 
-    def __init__(self, port, app, url_pattern="*", max_connections = 100, enabled = True):
+    def __init__(self, port, app, url_pattern="*", max_connections = 100, enabled = True, max_queued = 100,
+                logging = True, log_file = None):
         PyThread.__init__(self)
         #self.debug("Server started")
         self.Port = port
         self.WSGIApp = app
         self.Match = url_pattern
         self.Enabled = False
-        self.Connections = []
-        self.MaxConnections = max_connections
+        self.Logging = logging
+        self.LogFile = sys.stdout if log_file is None else log_file
+        self.Connections = TaskQueue(max_connections, capacity = max_queued)
         if enabled:
             self.enableServer()
         
+    @synchronized
+    def log(self, caddr, method, uri, status, bytes_sent):
+        self.LogFile.write("{}: {} {} {} {} {}\n".format(
+                time.ctime(), caddr[0], method, uri, status, bytes_sent
+        ))
+        if self.LogFile is sys.stdout:
+            self.LogFile.flush()
 
     def urlMatch(self, path):
         return fnmatch.fnmatch(path, self.Match)
@@ -259,10 +329,8 @@ class HTTPServer(PyThread):
     def disableServer(self):
         self.Enabled = False
 
-    @synchronized
     def connectionClosed(self, conn):
-        if conn in self.Connections:
-            self.Connections.remove(conn)
+        pass
             
     @synchronized
     def connectionCount(self):
@@ -274,12 +342,8 @@ class HTTPServer(PyThread):
         self.Sock.bind(('', self.Port))
         self.Sock.listen(10)
         while True:
-            rlist, _, _  = select.select([self.Sock], [], [], 1)
-            if self.Enabled and self.connectionCount() < self.MaxConnections:
-                csock, caddr = self.Sock.accept()
-                conn = HTTPConnection(self, csock, caddr)
-                self.Connections.append(conn)
-                conn.start()
+            csock, caddr = self.Sock.accept()
+            self.Connections << HTTPConnection(self, csock, caddr)
                 
                 
 def run_server(port, app, url_pattern="*"):

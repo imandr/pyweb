@@ -1,13 +1,13 @@
 import warnings
 
-from webob.compat import (
+from .compat import (
     escape,
     string_types,
     text_,
     text_type,
     )
 
-from webob.headers import _trans_key
+from .headers import _trans_key
 
 def html_escape(s):
     """HTML-escape a string or object

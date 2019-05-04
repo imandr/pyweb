@@ -170,16 +170,16 @@ from string import Template
 import re
 import sys
 
-from webob.acceptparse import create_accept_header
-from webob.compat import (
+from .acceptparse import create_accept_header
+from .compat import (
     class_types,
     text_,
     text_type,
     urlparse,
     )
-from webob.request import Request
-from webob.response import Response
-from webob.util import html_escape
+from .request import Request
+from .response import Response
+from .util import html_escape
 
 tag_re = re.compile(r'<.*?>', re.S)
 br_re = re.compile(r'<br.*?>', re.I | re.S)

@@ -13,7 +13,7 @@ import string
 import time
 import warnings
 
-from webob.compat import (
+from .compat import (
     MutableMapping,
     PY2,
     text_type,
@@ -23,7 +23,7 @@ from webob.compat import (
     string_types,
     )
 
-from webob.util import strings_differ
+from .util import strings_differ
 
 __all__ = ['Cookie', 'CookieProfile', 'SignedCookieProfile', 'SignedSerializer',
            'JSONSerializer', 'Base64Serializer', 'make_cookie']

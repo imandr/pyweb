@@ -11,7 +11,13 @@ class TopHandler(WebPieHandler):
     def __init__(self, request, app, path):
         WebPieHandler.__init__(self, request, app, path)
         self.A = SubHandler(request, app, "/A")
+        
+    def hello(self, request, relpath, **args):
+        return "Hello world!", "text/plain"
+        
+    def post(self, request, relpath, **args):
+        return "Body length={}".format(len(request.body))
+        
     
-app = MyApp(TopHandler)
+application = MyApp(TopHandler)
 
-run_server(8001, app)

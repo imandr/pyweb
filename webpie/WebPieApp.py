@@ -5,6 +5,12 @@ from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
 import os.path, os, stat, sys, traceback
 from threading import RLock
 
+try:
+    from collections.abc import Iterable    # Python3
+except ImportError:
+    from collections import Iterable
+
+
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
         webob_request.__init__(self, *agrs, **kv)
@@ -103,7 +109,61 @@ class WebPieHandler:
             return self.find_object(path_to, next_obj, rest)
         else:
             return obj, next, rest
-
+            
+    def makeResponse(self, resp):
+        #
+        # acceptable responses:
+        #
+        # Response
+        # text              -- ala Flask
+        # (text, status)            
+        # (text, "content_type")            
+        # (text, {headers})            
+        # (text, status, "content_type")
+        # (text, status, {headers})
+        #
+        
+        if isinstance(resp, Response):
+            return resp
+        
+        body_or_iter = None
+        content_type = None
+        status = None
+        extra = None
+        if isinstance(resp, tuple) and len(resp) == 2:
+            body_or_iter, extra = resp
+        elif isinstance(resp, tuple) and len(tuple) == 3:
+            body_or_iter, status, extra = resp
+        elif isinstance(resp, (str, bytes)):
+            body_or_iter = resp
+        elif isinstance(resp, Iterable):
+            body_or_iter = resp
+        else:
+            raise ValueError("Handler method returned uninterpretable value: " + repr(resp))
+            
+        response = Response()
+        
+        if isinstance(body_or_iter, str):
+            response.text = body_or_iter
+        elif isinstance(body_or_iter, bytes):
+            response.body = body_or_iter
+        elif isinstance(body_or_iter, Iterable):
+            response.app_iter = body_or_iter
+        else:
+            raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
+            
+        if extra is not None:
+            if isinstance(extra, dict):
+                response.headers = extra
+            elif isinstance(extra, str):
+                response.content_type = extra
+            elif isinstance(extra, int):
+                response.status = extra
+            else:
+                raise ValueError("Unknown type for headers: " + repr(extra))
+        
+        return response
+            
     def wsgi_call(self, environ, start_response):
         #print 'wsgi_call...'
         path_to = '/'
@@ -125,30 +185,37 @@ class WebPieHandler:
                 resp = Response('Authorization required',
                     status = '403 Forbidden')
             else:
-                dict = {}
+                args = {}
                 for k in req.GET.keys():
                     v = req.GET.getall(k)
-                    if type(v) == type([]) and len(v) == 1:
+                    if isinstance(v, list) and len(v) == 1:
                         v = v[0]
-                    dict[k] = v
+                    args[k] = v
                 try:
                     #print 'calling method: ',m
-                    resp = m(req, relpath, **dict)
+                    resp = m(req, relpath, **args)
                     #print resp
-                except HTTPException, val:
+                    if resp == None:        
+                        resp = req.getResponse()    # legacy
+                        
+                    try:    response = self.makeResponse(resp)
+                    except ValueError as e:
+                        response = self.App.applicationErrorResponse(str(e), sys.exc_info())
+                    
+
+                except HTTPException as val:
                     #print 'caught:', type(val), val
-                    resp = val
-                except HTTPResponseException, val:
+                    response = val
+                except HTTPResponseException as val:
                     #print 'caught:', type(val), val
-                    resp = val
+                    response = val
                 except:
-                    resp = self.App.applicationErrorResponse(
+                    response = self.App.applicationErrorResponse(
                         "Uncaught exception", sys.exc_info())
-                if resp == None:
-                    resp = req.getResponse()
         self.destroy()
         self._destroy()
-        out = resp(environ, start_response)
+        #print ("wsgi_call: response=", response)
+        out = response(environ, start_response)
         return out
 
     def hello(self, req, relpath):
