@@ -19,7 +19,7 @@ class TopHandler(WebPieHandler):
         return "Hello world!", "text/plain"
         
     def post(self, request, relpath, **args):
-        return "Body length={}".format(len(request.body))
+        return "Data received: {} bytes\n".format(len(request.body))
         
     
 app = MyApp(TopHandler)

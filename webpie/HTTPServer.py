@@ -156,7 +156,7 @@ class HTTPConnection(Task):
                 if k:
                     v = None
                     if len(words) > 1:  v = words[1]
-                    if out.has_key(k):
+                    if k in out:
                         old = out[k]
                         if type(old) != type([]):
                             old = [old]
@@ -177,9 +177,13 @@ class HTTPConnection(Task):
         )
         
         if self.HeadersDict.get("Expect") == "100-continue":
-            self.CSock.send(b'HTTP/1.1 100-Continue\n')
-            
-        
+            if self.Server.acceptIncomingTransfer(self.RequestMethod, self.URL, self.HeadersDict):
+                self.CSock.send(b'HTTP/1.1 100 Continue\n\n')
+            else:
+                self.start_response("403 Object is rejected", [])
+                self.OutputEnabled = True
+                return []
+                
         env["wsgi.url_scheme"] = "http"
         env["query_dict"] = self.parseQuery(self.QueryString)
         

@@ -5,16 +5,21 @@ class MyApp(WebPieSessionApp):
     
 class MyHandler(WebPieHandler):
 
-    def data(self, request, relpath, name=None, value=None):
-        if value is None:
-            return Response(self.session[name], content_type="text/plain")
-        else:
-            self.session[name] = value
-            return Response("OK", content_type="text/plain")
+    def set(self, request, relpath, **args):
+        for k, v in args.items():
+            self.session[k] = v
+        return "OK", "text/plain"
+
+    def get(self, request, name):
+        return str(self.session.get(name)), "text/plain"
 
     def clear(self, request, relpath):
         self.session.clear()
         return Response("OK", content_type="text/plain")
+        
+    def invalidate(self, request, relpath):
+        self.session.invalidate()
+        return "OK", "text/plain"
         
     def bulk(self, request, relpath, name=None, value=None):
         if value is None:

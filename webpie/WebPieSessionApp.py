@@ -7,20 +7,7 @@ import glob, uuid, hashlib
 _hash_algorithm = None
 
 def random_string():
-    global _hash_algorithm
-    alg = _hash_algorithm
-    if alg is None:
-        prefered = ['sha256', 'sha224', 'sha384', 'sha512', 'md5']
-        for a in prefered:
-            if a in hashlib.algorithms_available:
-                _hash_algorithm = alg = a
-                break
-        else:
-            raise ValueError("Can not find hash algorithm")
-    h = hashlib.new(alg)
-    h.update("%f" % (time.time(),))
-    h.update(uuid.uuid1().hex)
-    return h.hexdigest()
+    return uuid.uuid1().hex
         
 
 # Cookie module stolen from pesto

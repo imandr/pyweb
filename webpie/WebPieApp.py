@@ -163,7 +163,7 @@ class WebPieHandler:
                 raise ValueError("Unknown type for headers: " + repr(extra))
         
         return response
-            
+        
     def wsgi_call(self, environ, start_response):
         #print 'wsgi_call...'
         path_to = '/'
@@ -174,15 +174,15 @@ class WebPieHandler:
             #print 'find_object..'
             obj, method, relpath = self.find_object(path_to, self, path_down)
         except AttributeError:
-            resp = Response("Invalid path %s" % (path_down,), 
+            response = Response("Invalid path %s" % (path_down,), 
                             status = '500 Bad request')
         except AssertionError:
-            resp = Response('Attempt to access private method',
+            response = Response('Attempt to access private method',
                     status = '500 Bad request')
         else:
             m = getattr(obj, method)
             if not self._checkPermissions(m):
-                resp = Response('Authorization required',
+                response = Response('Authorization required',
                     status = '403 Forbidden')
             else:
                 args = {}
@@ -380,6 +380,11 @@ class WebPieApp:
     def _app_lock(self):
         return self._AppLock
     
+    # override
+    @app_synchronized
+    def acceptIncomingTransfer(self, method, uri, headers):
+        return True
+            
     @app_synchronized
     def initJinjaEnvironment(self, tempdirs = [], filters = {}, globals = {}):
         # to be called by subclass
