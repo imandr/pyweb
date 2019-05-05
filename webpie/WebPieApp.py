@@ -165,9 +165,71 @@ class WebPieHandler:
         return response
         
     def wsgi_call(self, environ, start_response):
+        path_to = '/'
+        path = environ.get('PATH_INFO', '')
+        path_down = path.split("/")
+        response = self.walk_down(environ, path, path_to, path_down)
+        out = response(environ, start_response)
+        self.destroy()
+        self._destroy()
+        return out
+        
+    def walk_down(self, environ, path, path_to, path_down):
+        self.Path = path_to
+        while path_down and not path_down[0]:
+            path_down = path_down[1:]
+        method = None
+        if not path_down:
+            if not hasattr(self, "index"):
+                return Response("Invalid path %s" % (path,), status = '500 Bad request')
+            method = getattr(self, "index")
+        else:
+            item_name = path_down[0]
+            path_down = path_down[1:]
+            if hasattr(self, item_name):
+                item = getattr(self, item_name)
+                if isinstance(item, WebPieHandler):
+                    if path_to[-1] != '/':  path_to += '/'
+                    path_to += item_name
+                    return item.walk_down(environ, path, path_to, path_down)
+                else:
+                    method = item
+        
+        req = Request(environ)
+        relpath = "/".join(path_down)
+        args = {}
+        for k in req.GET.keys():
+            v = req.GET.getall(k)
+            if isinstance(v, list) and len(v) == 1:
+                v = v[0]
+            args[k] = v
+        try:
+            #print 'calling method: ',m
+            response = method(req, relpath, **args)
+            #print resp
+            if response == None:        
+                response = req.getResponse()    # legacy
+            
+            try:    response = self.makeResponse(response)
+            except ValueError as e:
+                response = self.App.applicationErrorResponse(str(e), sys.exc_info())
+        
+        except HTTPException as val:
+            #print 'caught:', type(val), val
+            response = val
+        except HTTPResponseException as val:
+            #print 'caught:', type(val), val
+            response = val
+        except:
+            response = self.App.applicationErrorResponse(
+                "Uncaught exception", sys.exc_info())
+        return response
+                
+    def wsgi_call__(self, environ, start_response):
         #print 'wsgi_call...'
         path_to = '/'
         path_down = environ.get('PATH_INFO', '')
+        print ("path_down:", path_down)
         #print 'path:', path_down
         req = Request(environ)
         try:
@@ -223,9 +285,9 @@ class WebPieHandler:
         return resp
        
     def env(self, req, relpath):
-        return Response(app_iter = [
+        return (
             "%s = %s\n" % (k, repr(v)) for k, v in sorted(req.environ.items())
-        ], content_type="text/plain")
+        ), "text/plain"
 
     def _checkPermissions(self, x):
         #self.apacheLog("doc: %s" % (x.__doc__,))

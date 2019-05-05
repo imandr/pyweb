@@ -177,7 +177,7 @@ class HTTPConnection(Task):
         )
         
         if self.HeadersDict.get("Expect") == "100-continue":
-            if self.Server.acceptIncomingTransfer(self.RequestMethod, self.URL, self.HeadersDict):
+            if True: #self.Server.acceptIncomingTransfer(self.RequestMethod, self.URL, self.HeadersDict):
                 self.CSock.send(b'HTTP/1.1 100 Continue\n\n')
             else:
                 self.start_response("403 Object is rejected", [])

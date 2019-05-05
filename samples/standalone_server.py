@@ -7,7 +7,9 @@ class MyApp(WebPieApp):
     pass
     
 class SubHandler(WebPieHandler):
-    pass
+    
+    def index(self, request, relpath, **args):
+        return "index"
     
 class TopHandler(WebPieHandler):
     
