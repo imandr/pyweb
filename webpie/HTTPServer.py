@@ -209,6 +209,7 @@ class HTTPConnection(Task):
                 #self.debug("call wsgi_app")
                 output = self.Server.wsgi_app(env, self.start_response)    
                 self.OutBuffer += output
+		#print("OutputBuffer:", self.OutBuffer)
                 #self.debug("wsgi_app done")
                 
         except:
@@ -255,10 +256,11 @@ class HTTPConnection(Task):
         if self.OutBuffer:
             line = self.OutBuffer[0]
             try:
-                if isinstance(line, str):
-                    line = bytes(line, "utf-8")
+                if isinstance(line, str) and sys.version_info >= (3,):
+		    line = bytes(line, "utf-8")
                 sent = self.CSock.send(line)
             except: 
+		raise
                 sent = 0
             self.BytesSent += sent
             if not sent:

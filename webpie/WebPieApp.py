@@ -4,6 +4,7 @@ from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
     
 import os.path, os, stat, sys, traceback
 from threading import RLock
+from .HTTPServer import HTTPServer
 
 try:
     from collections.abc import Iterable    # Python3
@@ -144,7 +145,10 @@ class WebPieHandler:
         response = Response()
         
         if isinstance(body_or_iter, str):
-            response.text = body_or_iter
+	    if sys.version_info >= (3,):
+		    response.text = body_or_iter
+	    else:
+		    response.text = unicode(body_or_iter, "utf-8")
         elif isinstance(body_or_iter, bytes):
             response.body = body_or_iter
         elif isinstance(body_or_iter, Iterable):
@@ -161,6 +165,7 @@ class WebPieHandler:
                 response.status = extra
             else:
                 raise ValueError("Unknown type for headers: " + repr(extra))
+	#print response
         
         return response
         
@@ -172,6 +177,7 @@ class WebPieHandler:
         out = response(environ, start_response)
         self.destroy()
         self._destroy()
+	#print ("out:", out)
         return out
         
     def walk_down(self, environ, path, path_to, path_down):
@@ -520,6 +526,12 @@ class WebPieApp:
     def render_to_iterator(self, temp, **kv):
         t = self.JEnv.get_template(temp)
         return t.generate(self.addEnvironment(kv))
+
+    def run_server(self, port, url_pattern="*"):
+	    srv = HTTPServer(port, self, url_pattern=url_pattern)
+	    srv.start()
+	    srv.join()
+
         
 if __name__ == '__main__':
     from HTTPServer import HTTPServer

@@ -13,7 +13,7 @@ class TopHandler(WebPieHandler):
         self.A = SubHandler(request, app, "/A")
         
     def hello(self, request, relpath, **args):
-        return "Hello world!", "text/plain"
+        return "Hello world!\n", "text/plain"
         
     def post(self, request, relpath, **args):
         return "Body length={}".format(len(request.body))

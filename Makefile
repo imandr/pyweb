@@ -17,7 +17,7 @@ build: $(BUILD_DIR)
 	cp LICENSE $(BUILD_DIR)
     
 tarball: clean build $(TAR_DIR)
-	cd $(BUILD_DIR)/..; tar cf $(TAR_FILE) webpie
+	cd $(BUILD_DIR); tar cf $(TAR_FILE) *
 	@echo 
 	@echo Tar file $(TAR_FILE) is ready
 	@echo 
