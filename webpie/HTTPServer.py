@@ -257,10 +257,9 @@ class HTTPConnection(Task):
             line = self.OutBuffer[0]
             try:
                 if isinstance(line, str) and sys.version_info >= (3,):
-		    line = bytes(line, "utf-8")
+                    line = bytes(line, "utf-8")
                 sent = self.CSock.send(line)
             except: 
-		raise
                 sent = 0
             self.BytesSent += sent
             if not sent:

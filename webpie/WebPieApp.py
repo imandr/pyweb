@@ -145,10 +145,10 @@ class WebPieHandler:
         response = Response()
         
         if isinstance(body_or_iter, str):
-	    if sys.version_info >= (3,):
-		    response.text = body_or_iter
-	    else:
-		    response.text = unicode(body_or_iter, "utf-8")
+            if sys.version_info >= (3,):
+                response.text = body_or_iter
+            else:
+                response.text = unicode(body_or_iter, "utf-8")
         elif isinstance(body_or_iter, bytes):
             response.body = body_or_iter
         elif isinstance(body_or_iter, Iterable):
