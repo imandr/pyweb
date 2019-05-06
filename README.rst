@@ -4,7 +4,8 @@ WebPie
 WebPie (another way of spelling web-py) is a web application development framework for Python based on the WSGI standard.
 WebPie makes it simple to develop thread-safe object-oriented web applications.
 
-## Hello World in WebPie
+Hello World in WebPie
+---------------------
 
 Here is the simplest web application you can write:
 
@@ -220,7 +221,8 @@ The WebPieApp is created when the web server starts and it exists until the serv
 
 Of course the way it is written, our application is not very therad-safe, but we will talk about this later.
 
-## Web Server Methods in Details
+Web Server Methods in Details
+-----------------------------
 
 The web the WebPie server handler method has 2 fixed arguments and optional keyword arguments.
 
