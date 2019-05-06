@@ -177,7 +177,7 @@ Any handler in the tree can have its own methods. For example:
 Application and Handler Lifetime
 --------------------------------
 
-The WebPieApp object is created _once_ when the web server starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When Handler object is created, it receives the pointer to the App object as its constructor argiment. Also, for convenience, Handler object's App member always pointt to the App object. This allows the App object to keep some persistent information and let Handler objects access it. For example, or clock application can also maintain number of requests it has received:
+The WebPieApp object is created *once* when the web server starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When the handler object is created, it receives the pointer to the app object as its constructor argument. Also, for convenience, Handler object's App member always pointt to the app object. This allows the app object to keep some persistent information and let handler objects access it. For example, or clock application can also maintain number of requests it has received:
 
 .. code-block:: python
 
@@ -221,36 +221,35 @@ The WebPieApp object is created _once_ when the web server starts and it exists 
 
 Of course the way it is written, our application is not very therad-safe, but we will talk about this later.
 
-Web Server Methods in Details
------------------------------
+Web Methods in Details
+----------------------
 
 The web the WebPie server handler method has 2 fixed arguments and optional keyword arguments.
 
 First argiment is the request object, which encapsulates all the information about the HTTP request. Currently WebPie uses WebOb library Request and Response classes to handle HTTP requests and responses.
 
-Most generally, web server method looks like this:
+Arguments
+~~~~~~~~~
+
+Most generally, web method looks like this:
 
 .. code-block:: python
 
-	from webpie import WebPieHandler, Response
-	
-	class Handler(WebPieHandler):
-
-	    #...
-	    def method(self, request, relpath, **url_args):
-	        # ...
-	        return Response(...)
+    def method(self, request, relpath, **url_args):
+        # ...
+        return response
 
 
-Method arguments are:
+Web method arguments are:
 
 request
-~~~~~~~
+.......
 
-request is WebOb request object
+request is WebOb request object built from the WSGI environment. For convenience, it is also available as the handler's
+Request member.
 
 relpath
-~~~~~~~
+.......
 
 Sometimes the URI elements are used as web service method arguments and relpath is the tail of the URI remaining unused after the mapping from URI to the method is done. For example, in our clock example, we may want to use URL like this to specify the field of the current time we want to see:
 
@@ -269,7 +268,7 @@ Here is the code which does this:
 
 	class MyHandler(WebPieHandler):						
 
-		def time(self, request, relpath):				# 1
+		def time(self, request, relpath):			
 			t = datetime.now()
 			if not relpath:
 				return str(t)+"\n"
@@ -290,7 +289,7 @@ Here is the code which does this:
 	application.run_server(8080)
 
 url_args
-~~~~~~~~
+........
 
 Typically URL includes so called query parameters, e.g.:
 
@@ -339,4 +338,23 @@ and then call it like this:
 	$ curl  "http://localhost:8080/time?field=year"
 	2019
 
+Return Value
+~~~~~~~~~~~~
+Conveniently, there is a number of ways to return something from the web method. Ultimately, all of them are used to produce and return WebOb Response object. Here is complete list of possibilities and coresponding ways to build the
+Response object from them:
 
+======================================  =================================== ==================================================================
+return                                  example                             equivalent
+======================================  =================================== ==================================================================
+Response object                         Response("OK")                      same - Response("OK")
+text                                    "hello world"                       Response("hello world")
+text, content type                      "OK", "text/plain"                  Response("OK",content_type="text/plain")
+text, status                            "Error", 500                        Response("Error", status_code=500)
+text, status, content type              "Error", 500, "text/plain"          Response("Error", status_code=500, content_type="text/plain")
+text, headers                           "OK", {"Content-type":"text/plain"} Response("OK", headers={"Content-type":"text/plain"})
+list                                    ["Hello","world"]                   Response(app_iter=["Hello","world"])
+iterable                                (x for x in ["hi","there"])         Response(app_iter=(x for x in ["hi","there"]))
+iterable, content_type
+iterable, status, content_type
+iterable, status, headers
+======================================  =================================== ==================================================================
