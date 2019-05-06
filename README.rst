@@ -177,7 +177,7 @@ Any handler in the tree can have its own methods. For example:
 Application and Handler Lifetime
 --------------------------------
 
-The WebPieApp is created when the web server starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When Handler object is created, it receives the pointer to the App object as its constructor argiment. Also, for convenience, Handler object's App member always pointt to the App object. This allows the App object to keep some persistent information and let Handler objects access it. For example, or clock application can also maintain number of requests it has received:
+The WebPieApp object is created _once_ when the web server starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When Handler object is created, it receives the pointer to the App object as its constructor argiment. Also, for convenience, Handler object's App member always pointt to the App object. This allows the App object to keep some persistent information and let Handler objects access it. For example, or clock application can also maintain number of requests it has received:
 
 .. code-block:: python
 
