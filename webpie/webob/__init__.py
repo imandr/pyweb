@@ -1,4 +1,4 @@
-from webob.datetime_utils import (  # noqa: F401
+from .datetime_utils import (  # noqa: F401
     UTC,
     day,
     hour,
@@ -13,9 +13,9 @@ from webob.datetime_utils import (  # noqa: F401
     week,
     year
 )
-from webob.request import BaseRequest, LegacyRequest, Request
-from webob.response import Response
-from webob.util import html_escape
+from .request import BaseRequest, LegacyRequest, Request
+from .response import Response
+from .util import html_escape
 
 __all__ = [
     'Request', 'LegacyRequest', 'Response', 'UTC', 'day', 'week', 'hour',

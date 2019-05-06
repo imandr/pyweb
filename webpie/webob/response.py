@@ -5,9 +5,9 @@ from base64 import b64encode
 from datetime import datetime, timedelta
 from hashlib import md5
 
-from webob.byterange import ContentRange
-from webob.cachecontrol import CacheControl, serialize_cache_control
-from webob.compat import (
+from .byterange import ContentRange
+from .cachecontrol import CacheControl, serialize_cache_control
+from .compat import (
     PY2,
     bytes_,
     native_,
@@ -16,13 +16,13 @@ from webob.compat import (
     url_quote,
     urlparse,
 )
-from webob.cookies import Cookie, make_cookie
-from webob.datetime_utils import (
+from .cookies import Cookie, make_cookie
+from .datetime_utils import (
     parse_date_delta,
     serialize_date_delta,
     timedelta_to_seconds,
 )
-from webob.descriptors import (
+from .descriptors import (
     CHARSET_RE,
     SCHEME_RE,
     converter,
@@ -39,9 +39,9 @@ from webob.descriptors import (
     serialize_etag_response,
     serialize_int,
 )
-from webob.headers import ResponseHeaders
-from webob.request import BaseRequest
-from webob.util import status_generic_reasons, status_reasons, warn_deprecation
+from .headers import ResponseHeaders
+from .request import BaseRequest
+from .util import status_generic_reasons, status_reasons, warn_deprecation
 
 try:
     import simplejson as json

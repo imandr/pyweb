@@ -7,7 +7,7 @@ Gives a multi-value dictionary object (MultiDict) plus several wrappers
 import binascii
 import warnings
 
-from webob.compat import (
+from .compat import (
     MutableMapping,
     PY2,
     iteritems_,

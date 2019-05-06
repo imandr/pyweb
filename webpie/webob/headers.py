@@ -1,9 +1,9 @@
-from webob.compat import (
+from .compat import (
     MutableMapping,
     iteritems_,
     string_types,
     )
-from webob.multidict import MultiDict
+from .multidict import MultiDict
 
 __all__ = ['ResponseHeaders', 'EnvironHeaders']
 

@@ -7,22 +7,22 @@ from datetime import (
 
 from collections import namedtuple
 
-from webob.byterange import (
+from .byterange import (
     ContentRange,
     Range,
     )
 
-from webob.compat import (
+from .compat import (
     PY2,
     text_type,
     )
 
-from webob.datetime_utils import (
+from .datetime_utils import (
     parse_date,
     serialize_date,
     )
 
-from webob.util import (
+from .util import (
     header_docstring,
     warn_deprecation,
     )
