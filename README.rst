@@ -344,7 +344,7 @@ Conveniently, there is a number of ways to return something from the web method.
 Response object from them:
 
 ======================================  =================================== ==================================================================
-return                                  example                             equivalent
+return                                  example                             equivalent Response object
 ======================================  =================================== ==================================================================
 Response object                         Response("OK")                      same - Response("OK")
 text                                    "hello world"                       Response("hello world")
