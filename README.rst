@@ -348,10 +348,10 @@ return                                  example                             equi
 ======================================  =================================== ==================================================================
 Response object                         Response("OK")                      same - Response("OK")
 text                                    "hello world"                       Response("hello world")
-text, content type                      "OK", "text/plain"                  Response("OK",content_type="text/plain")
+text, content type                      "OK", "text/plain"                  Response("OK", content_type="text/plain")
 text, status                            "Error", 500                        Response("Error", status_code=500)
 text, status, content type              "Error", 500, "text/plain"          Response("Error", status_code=500, content_type="text/plain")
-text, headers                           "OK", {"Content-type":"text/plain"} Response("OK", headers={"Content-type":"text/plain"})
+text, headers                           "OK", {"Content-Type":"text/plain"} Response("OK", headers={"Content-Type":"text/plain"})
 list                                    ["Hello","world"]                   Response(app_iter=["Hello","world"])
 iterable                                (x for x in ["hi","there"])         Response(app_iter=(x for x in ["hi","there"]))
 iterable, content_type
