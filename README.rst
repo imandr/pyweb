@@ -340,8 +340,8 @@ and then call it like this:
 
 Return Value
 ~~~~~~~~~~~~
-Conveniently, there is a number of ways to return something from the web method. Ultimately, all of them are used to produce and return WebOb Response object. Here is complete list of possibilities and coresponding ways to build the
-Response object from them:
+The output of a web method is a Response object. Conveniently, there is a number of ways to return something from the web method. Ultimately, all of them are used to produce and return the Response object. Here is a list of possibile returns from the web oject and how the framework
+converts the output to the Response object:
 
 ======================================  =================================== ==================================================================
 return                                  example                             equivalent Response object

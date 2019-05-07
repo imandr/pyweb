@@ -32,7 +32,8 @@ class MyHandler(WebPieHandler):
             {
                 "ctime":    time.ctime(),
                 "clock":    time.time()
-            })
+            }
+        )
         return json.dumps(data), "text/json"
         
 WebPieApp(MyHandler).run_server(8080)
