@@ -211,6 +211,7 @@ class HTTPConnection(Task):
                 self.OutIterable = response(env, self.start_response)
             else:
                 self.OutIterable = self.Server.wsgi_app(env, self.start_response)    
+                #print("OutIterabe:", self.OutIterable)
         except:
                 self.start_response("500 Error", 
                                 [("Content-Type","text/plain")])
@@ -224,8 +225,8 @@ class HTTPConnection(Task):
         out = ["HTTP/1.1 " + status]
         for h,v in headers:
             out.append("{}: {}".format(h, v))
-        out.append("")
-        self.OutBuffer = "\n".join(out)
+        self.OutBuffer = "\n".join(out) + "\n\n"
+        #print("OutBuffer: [{}]".format(self.OutBuffer))
         
     def doClientRead(self):
         if self.ReadClosed:

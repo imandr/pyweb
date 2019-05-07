@@ -24,7 +24,7 @@ setup(
     keywords = "web service, wsgi, web application",
     url = "https://github.com/imandr/webpie",
     packages=['webpie', 'samples', 'webpie/webob'],
-    long_description=read('README'),
+    long_description=read('README.rst'),
     classifiers=[
         "Operating System :: POSIX",
         "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
