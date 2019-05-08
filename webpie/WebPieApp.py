@@ -254,32 +254,6 @@ class WebPieHandler:
         # override me
         return True
 
-    def static(self, req, rel_path, **args):
-        while ".." in rel_path:
-            rel_path = rel_path.replace("..",".")
-        home = self.App.ScriptHome
-        path = os.path.join(home, "static", rel_path)
-        try:
-            st_mode = os.stat(path).st_mode
-            if not stat.S_ISREG(st_mode):
-                #print "not a regular file"
-                raise ValueError("Not a regular file")
-        except:
-            #raise
-            return Response("Not found", status=404)
-            
-        ext = path.rsplit('.',1)[-1]
-        mime_type = self.MIME_TYPES_BASE.get(ext, "text/html")
-
-        def read_iter(f):
-            while True:
-                data = f.read(100000)
-                if not data:    break
-                yield data
-            
-        return Response(app_iter = read_iter(open(path, "rb")),
-            content_type = mime_type)
-
     def _destroy(self):
         self.App = None
         if self.BeingDestroyed: return      # avoid infinite loops

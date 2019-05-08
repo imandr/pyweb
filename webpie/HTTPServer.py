@@ -1,6 +1,7 @@
-import fnmatch, traceback, sys, select, time
+import fnmatch, traceback, sys, select, time, os.path, stat
 from socket import *
 from pythreader import PyThread, synchronized, Task, TaskQueue
+from .WebPieApp import Response
 
         
 class BodyFile(object):
@@ -58,22 +59,23 @@ class HTTPConnection(Task):
         self.CAddr = caddr
         self.CSock = csock
         self.ReadClosed = False
-        self.Request = None
+        self.RequestHeadline = None
+        self.RequestReceived = False
         self.RequestBuffer = ""
         self.Body = []
         self.Headers = []
         self.HeadersDict = {}
         self.URL = None
         self.RequestMethod = None
-        self.RequestReceived = False
         self.QueryString = ""
-        self.OutBuffer = []
+        self.OutIterable = None
+        self.OutBuffer = ""
         self.OutputEnabled = False
         self.BodyLength = None
         self.BytesSent = 0
         self.ResponseStatus = None
 
-    def requestReceived(self):
+    def parseRequest(self):
         #print("requestReceived:[%s]" % (self.RequestBuffer,))
         # parse the request
         lines = self.RequestBuffer.split('\n')
@@ -81,8 +83,8 @@ class HTTPConnection(Task):
         if not lines:
             self.shutdown()
             return
-        self.Request = lines[0].strip()
-        words = self.Request.split()
+        self.RequestHeadline = lines[0].strip()
+        words = self.RequestHeadline.split()
         #self.debug("Request: %s" % (words,))
         if len(words) != 3:
             self.shutdown()
@@ -133,14 +135,16 @@ class HTTPConnection(Task):
             inx = inx_rnrn
             n = 4
         #print ("addToRequest: inx={}, n={}".format(inx, n))
-        if inx >= 0:
-            rest = self.RequestBuffer[inx+n:]
-            self.RequestBuffer = self.RequestBuffer[:inx]
-            self.requestReceived()
-            #print("rest:[{}]".format(rest))
-            if rest:    
-                self.addToBody(rest)
-            self.processRequest()
+        if inx < 0:
+            return False        # request not received yet
+            
+        rest = self.RequestBuffer[inx+n:]
+        self.RequestBuffer = self.RequestBuffer[:inx]
+        self.parseRequest()
+        #print("rest:[{}]".format(rest))
+        if rest:    
+            self.addToBody(rest)
+        return True
             
     def addToBody(self, data):
         if isinstance(data, str):   data = bytes(data, "utf-8")
@@ -177,12 +181,7 @@ class HTTPConnection(Task):
         )
         
         if self.HeadersDict.get("Expect") == "100-continue":
-            if True: #self.Server.acceptIncomingTransfer(self.RequestMethod, self.URL, self.HeadersDict):
-                self.CSock.send(b'HTTP/1.1 100 Continue\n\n')
-            else:
-                self.start_response("403 Object is rejected", [])
-                self.OutputEnabled = True
-                return []
+            self.CSock.send(b'HTTP/1.1 100 Continue\n\n')
                 
         env["wsgi.url_scheme"] = "http"
         env["query_dict"] = self.parseQuery(self.QueryString)
@@ -204,29 +203,30 @@ class HTTPConnection(Task):
                 env["HTTP_%s" % (h.upper().replace("-","_"),)] = v
 
         env["wsgi.input"] = BodyFile(self.Body, self.CSock, self.BodyLength)
-
-        try:    
-                #self.debug("call wsgi_app")
-                output = self.Server.wsgi_app(env, self.start_response)    
-                self.OutBuffer += output
-		#print("OutputBuffer:", self.OutBuffer)
-                #self.debug("wsgi_app done")
-                
+        
+        
+        try:
+            if self.Server.isStaticURI(self.PathInfo):
+                response = self.Server.processStaticRequest(env, self.PathInfo, self.start_response)
+                self.OutIterable = response(env, self.start_response)
+            else:
+                self.OutIterable = self.Server.wsgi_app(env, self.start_response)    
+                #print("OutIterabe:", self.OutIterable)
         except:
-                #self.debug("Error: %s %s" % sys.exc_info()[:2])
                 self.start_response("500 Error", 
                                 [("Content-Type","text/plain")])
-                self.OutBuffer += [traceback.format_exc()]
+                self.OutBuffer = traceback.format_exc()
         self.OutputEnabled = True
         #self.debug("registering for writing: %s" % (self.CSock.fileno(),))    
 
     def start_response(self, status, headers):
         #print("start_response({}, {})".format(status, headers))
         self.ResponseStatus = status.split()[0]
-        self.OutBuffer.append("HTTP/1.1 " + status + "\n")
+        out = ["HTTP/1.1 " + status]
         for h,v in headers:
-            self.OutBuffer.append("%s: %s\n" % (h, v))
-        self.OutBuffer.append("\n")
+            out.append("{}: {}".format(h, v))
+        self.OutBuffer = "\n".join(out) + "\n\n"
+        #print("OutBuffer: [{}]".format(self.OutBuffer))
         
     def doClientRead(self):
         if self.ReadClosed:
@@ -239,22 +239,44 @@ class HTTPConnection(Task):
             data = ""
         
         #print("data:[{}]".format(data))
+
+        request_just_received = False
     
         if data:
-            if not self.Request:
-                self.addToRequest(data)
+            if not self.RequestReceived:
+                self.RequestReceived = request_just_received = self.addToRequest(data)
             else:
                 self.addToBody(data)
         else:
             self.ReadClosed = True
+            
+        if request_just_received:
+            self.processRequest()
 
-        if self.ReadClosed and not self.Request:
+        if self.ReadClosed and not self.RequestReceived:
             self.shutdown()
                     
     def doWrite(self):
         #print ("doWrite: outbuffer:", len(self.OutBuffer))
+        line = None
+        #print ("doWrite: buffer: {}, iterable: {}".format(self.OutBuffer, self.OutIterable))
         if self.OutBuffer:
-            line = self.OutBuffer[0]
+            line = self.OutBuffer
+            self.OutBuffer = None
+        elif isinstance(self.OutIterable, list):
+            if self.OutIterable:
+                line = self.OutIterable[0]
+                self.OutIterable = self.OutIterable[1:]
+            else: 
+                self.OutIterable = None
+                #print("OutIterable removed")
+        elif self.OutIterable is not None:
+            try:    
+                line = next(self.OutIterable)
+            except StopIteration:
+                self.OutIterable = None
+                #print("OutIterable removed")
+        if line is not None:
             try:
                 if isinstance(line, str) and sys.version_info >= (3,):
                     line = bytes(line, "utf-8")
@@ -268,10 +290,7 @@ class HTTPConnection(Task):
                 return
             else:
                 line = line[sent:]
-                if line:
-                    self.OutBuffer[0] = line
-                else:
-                    self.OutBuffer = self.OutBuffer[1:]
+                self.OutBuffer = line or None
         
     def shutdown(self):
             self.Server.log(self.CAddr, self.RequestMethod, self.URL, self.ResponseStatus, self.BytesSent)
@@ -293,13 +312,23 @@ class HTTPConnection(Task):
                 self.doClientRead()
             if self.CSock in wlist:
                 self.doWrite()
-            if self.OutputEnabled and not self.OutBuffer:
+            if self.OutputEnabled and not self.OutBuffer and self.OutIterable is None:
                 self.shutdown()     # noting else to send
 
 class HTTPServer(PyThread):
 
+    MIME_TYPES_BASE = {
+        "gif":   "image/gif",
+        "jpg":   "image/jpeg",
+        "jpeg":   "image/jpeg",
+        "js":   "text/javascript",
+        "html":   "text/html",
+        "txt":   "text/plain",
+        "css":  "text/css"
+    }
+
     def __init__(self, port, app, url_pattern="*", max_connections = 100, enabled = True, max_queued = 100,
-                logging = True, log_file = None):
+                logging = True, log_file = None, static_uri = "/static", static_location = "static"):
         PyThread.__init__(self)
         #self.debug("Server started")
         self.Port = port
@@ -309,6 +338,8 @@ class HTTPServer(PyThread):
         self.Logging = logging
         self.LogFile = sys.stdout if log_file is None else log_file
         self.Connections = TaskQueue(max_connections, capacity = max_queued)
+        self.StaticURI = static_uri
+        self.StaticLocation = static_location
         if enabled:
             self.enableServer()
         
@@ -350,7 +381,38 @@ class HTTPServer(PyThread):
             csock, caddr = self.Sock.accept()
             self.Connections << HTTPConnection(self, csock, caddr)
                 
-                
+    def isStaticURI(self, uri):
+        return self.StaticURI is not None and uri.startswith(self.StaticURI + "/")
+        
+    def processStaticRequest(self, env, path, start_response):
+        #print ("processStaticRequest({})".format(path))
+        assert path.startswith(self.StaticURI + "/")
+        path = path[len(self.StaticURI)+1:]
+        while ".." in path:
+            path = path.replace("..",".")       # can not jump up
+        path = os.path.join(self.StaticLocation, path)
+        #print ("path=", path)
+        try:
+            st_mode = os.stat(path).st_mode
+            if not stat.S_ISREG(st_mode):
+                #print "not a regular file"
+                return Response("Prohibited", status=403)
+        except:
+            return Response("Not found", status=404)
+            
+        ext = path.rsplit('.',1)[-1]
+        mime_type = self.MIME_TYPES_BASE.get(ext, "text/html")
+
+        def read_iter(f):
+            while True:
+                data = f.read(100000)
+                if not data:    break
+                yield data
+            
+        return Response(app_iter = read_iter(open(path, "rb")),
+            content_type = mime_type)
+            
+
 def run_server(port, app, url_pattern="*"):
     srv = HTTPServer(port, app, url_pattern=url_pattern)
     srv.start()
