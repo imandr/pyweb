@@ -195,7 +195,7 @@ class HTTPConnection(Task):
             elif h == "host":
                 words = v.split(":",1)
                 words.append("")    # default port number
-                env["HTTP_HOST"] = words[0]
+                env["HTTP_HOST"] = v
                 env["SERVER_NAME"] = words[0]
                 env["SERVER_PORT"] = words[1]
             elif h == "content-length": 

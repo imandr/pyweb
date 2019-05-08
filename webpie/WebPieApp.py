@@ -1,16 +1,30 @@
 from .webob import Response
 from .webob import Request as webob_request
-from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound
+from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPForbidden, HTTPNotFound
     
 import os.path, os, stat, sys, traceback
 from threading import RLock
-from .HTTPServer import HTTPServer
 
 try:
     from collections.abc import Iterable    # Python3
 except ImportError:
     from collections import Iterable
-
+    
+def webmethod(permissions=None):      # decorator for strict mode
+    def decorator(method):
+        def decorated(handler, request, *params, **args):
+            if permissions is not None:
+                try:    roles = handler.roles(request)
+                except:
+                    return HTTPForbidden("Can not authorize client")
+                for r in roles:
+                    if r in permissions:
+                        break
+                else:
+                    return HTTPForbidden()
+            return method(handler, request, *params, **args)
+        return decorated
+    return decorator
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -63,6 +77,8 @@ class WebPieHandler:
         "css":  "text/css"
     }
 
+    _Methods = None
+    
     def __init__(self, request, app, path = None):
         self.App = app
         self.Request = request
@@ -85,32 +101,6 @@ class WebPieHandler:
             ret = "%s/%s" % (ret, down)
         return ret
 
-    def find_object(self, path_to, obj, path_down):
-        #print 'find_object(%s, %s)' % (path_to, path_down)
-        path_down = path_down.lstrip('/')
-        #print 'find_object(%s, %s)' % (path_to, path_down)
-        if not path_down:
-            # We've arrived, but method is empty
-            return obj, 'index', ''
-        parts = path_down.split('/', 1)
-        next = parts[0]
-        if len(parts) == 1:
-            rest = ''
-        else:
-            rest = parts[1]
-        # Hide private methods/attributes:
-        assert not next.startswith('_')
-        # Now we get the attribute; getattr(a, 'b') is equivalent
-        # to a.b...
-        next_obj = getattr(obj, next)
-        if isinstance(next_obj, WebPieHandler):
-            if path_to and path_to[-1] != '/':
-                path_to += '/'
-            path_to += next
-            return self.find_object(path_to, next_obj, rest)
-        else:
-            return obj, next, rest
-            
     def makeResponse(self, resp):
         #
         # acceptable responses:
@@ -173,11 +163,24 @@ class WebPieHandler:
         path_to = '/'
         path = environ.get('PATH_INFO', '')
         path_down = path.split("/")
-        response = self.walk_down(environ, path, path_to, path_down)
+        try:
+            response = self.walk_down(environ, path, path_to, path_down)    
+        except HTTPFound as val:    
+            # redirect
+            response = val
+        except HTTPException as val:
+            #print 'caught:', type(val), val
+            response = val
+        except HTTPResponseException as val:
+            #print 'caught:', type(val), val
+            response = val
+        except:
+            response = self.App.applicationErrorResponse(
+                "Uncaught exception", sys.exc_info())
+        
         out = response(environ, start_response)
         self.destroy()
         self._destroy()
-	#print ("out:", out)
         return out
         
     def walk_down(self, environ, path, path_to, path_down):
@@ -186,9 +189,8 @@ class WebPieHandler:
             path_down = path_down[1:]
         method = None
         if not path_down:
-            if not hasattr(self, "index"):
-                return Response("Invalid path %s" % (path,), status = '500 Bad request')
-            method = getattr(self, "index")
+            if hasattr(self, "index"):
+                self.redirect("index")
         else:
             item_name = path_down[0]
             path_down = path_down[1:]
@@ -200,6 +202,12 @@ class WebPieHandler:
                     return item.walk_down(environ, path, path_to, path_down)
                 else:
                     method = item
+                    if (self.App._Strict or self._Methods is not None) \
+                                and not item_name in (self.__Methods or []):
+                        method = None
+
+        if method is None:
+            return HTTPNotFound("Invalid path %s" % (path,))
         
         req = Request(environ)
         relpath = "/".join(path_down)
@@ -209,82 +217,19 @@ class WebPieHandler:
             if isinstance(v, list) and len(v) == 1:
                 v = v[0]
             args[k] = v
-        try:
-            #print 'calling method: ',m
-            response = method(req, relpath, **args)
-            #print resp
-            if response == None:        
-                response = req.getResponse()    # legacy
             
-            try:    response = self.makeResponse(response)
-            except ValueError as e:
-                response = self.App.applicationErrorResponse(str(e), sys.exc_info())
-        
-        except HTTPException as val:
-            #print 'caught:', type(val), val
-            response = val
-        except HTTPResponseException as val:
-            #print 'caught:', type(val), val
-            response = val
-        except:
-            response = self.App.applicationErrorResponse(
-                "Uncaught exception", sys.exc_info())
+        response = method(req, relpath, **args)
+        #print resp
+        if response == None:        
+            response = req.getResponse()    # legacy
+
+        try:    
+            response = self.makeResponse(response)
+        except ValueError as e:
+            response = self.App.applicationErrorResponse(str(e), sys.exc_info())
+    
         return response
                 
-    def wsgi_call__(self, environ, start_response):
-        #print 'wsgi_call...'
-        path_to = '/'
-        path_down = environ.get('PATH_INFO', '')
-        print ("path_down:", path_down)
-        #print 'path:', path_down
-        req = Request(environ)
-        try:
-            #print 'find_object..'
-            obj, method, relpath = self.find_object(path_to, self, path_down)
-        except AttributeError:
-            response = Response("Invalid path %s" % (path_down,), 
-                            status = '500 Bad request')
-        except AssertionError:
-            response = Response('Attempt to access private method',
-                    status = '500 Bad request')
-        else:
-            m = getattr(obj, method)
-            if not self._checkPermissions(m):
-                response = Response('Authorization required',
-                    status = '403 Forbidden')
-            else:
-                args = {}
-                for k in req.GET.keys():
-                    v = req.GET.getall(k)
-                    if isinstance(v, list) and len(v) == 1:
-                        v = v[0]
-                    args[k] = v
-                try:
-                    #print 'calling method: ',m
-                    resp = m(req, relpath, **args)
-                    #print resp
-                    if resp == None:        
-                        resp = req.getResponse()    # legacy
-                        
-                    try:    response = self.makeResponse(resp)
-                    except ValueError as e:
-                        response = self.App.applicationErrorResponse(str(e), sys.exc_info())
-                    
-
-                except HTTPException as val:
-                    #print 'caught:', type(val), val
-                    response = val
-                except HTTPResponseException as val:
-                    #print 'caught:', type(val), val
-                    response = val
-                except:
-                    response = self.App.applicationErrorResponse(
-                        "Uncaught exception", sys.exc_info())
-        self.destroy()
-        self._destroy()
-        #print ("wsgi_call: response=", response)
-        out = response(environ, start_response)
-        return out
 
     def hello(self, req, relpath):
         resp = Response("Hello")
@@ -440,10 +385,11 @@ class WebPieApp:
 
     Version = "Undefined"
 
-    def __init__(self, root_class):
+    def __init__(self, root_class, strict=False):
         self.RootClass = root_class
         self.JEnv = None
         self._AppLock = RLock()
+        self._Strict = strict
 
     def _app_lock(self):
         return self._AppLock
@@ -528,6 +474,7 @@ class WebPieApp:
         return t.generate(self.addEnvironment(kv))
 
     def run_server(self, port, url_pattern="*"):
+        from .HTTPServer import HTTPServer
 	    srv = HTTPServer(port, self, url_pattern=url_pattern)
 	    srv.start()
 	    srv.join()
@@ -542,7 +489,4 @@ if __name__ == '__main__':
     class MyHandler(WebPieHandler):
         pass
             
-    app = MyApp(MyHandler)
-    hs = HTTPServer(8001, "*", app)
-    hs.start()
-    hs.join()
+    MyApp(MyHandler).run_server(8080)
