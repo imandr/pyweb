@@ -9,22 +9,56 @@ try:
     from collections.abc import Iterable    # Python3
 except ImportError:
     from collections import Iterable
-    
-def webmethod(permissions=None):      # decorator for strict mode
+
+_WebMethodSignature = "__WebPie:webmethod__"
+
+#
+# Decorators
+#
+ 
+def webmethod(permissions=None):
+    #
+    # Usage:
+    #
+    # class Handler(WebPieHandler):
+    #   ...
+    #   @webmethod()            # <-- important: parenthesis required !
+    #   def hello(self, req, relpath, **args):
+    #       ...
+    #
+    #   @webmethod(permissions=["admin"])
+    #   def method(self, req, relpath, **args):
+    #       ...
+    #
     def decorator(method):
-        def decorated(handler, request, *params, **args):
+        def decorated(handler, request, relpath, *params, **args):
+            if isinstance(permissions, str):
+                permissions = [permissions]
             if permissions is not None:
-                try:    roles = handler.roles(request)
+                try:    roles = handler._roles(request, relpath)
                 except:
                     return HTTPForbidden("Can not authorize client")
+                if isinstance(roles, str):
+                    roles = [roles]
                 for r in roles:
                     if r in permissions:
                         break
                 else:
                     return HTTPForbidden()
-            return method(handler, request, *params, **args)
+            return method(handler, request, relpath, *params, **args)
+        decorated.__doc__ = _WebMethodSignature
         return decorated
     return decorator
+
+def app_synchronized(method):
+    def synchronized_method(self, *params, **args):
+        with self._app_lock():
+            return method(self, *params, **args)
+    return synchronized_method
+
+
+
+
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -55,13 +89,6 @@ class Request(webob_request):
 class HTTPResponseException(Exception):
     def __init__(self, response):
         self.value = response
-
-def app_synchronized(method):
-    def synchronized_method(self, *params, **args):
-        with self._app_lock():
-            return method(self, *params, **args)
-    return synchronized_method
-
 
 class WebPieHandler:
 
@@ -201,10 +228,19 @@ class WebPieHandler:
                     path_to += item_name
                     return item.walk_down(environ, path, path_to, path_down)
                 else:
-                    method = item
-                    if (self.App._Strict or self._Methods is not None) \
-                                and not item_name in (self.__Methods or []):
-                        method = None
+                    method_name = item_name
+                    method = None
+                    if self.App._Strict:
+                        if (
+                                (self._Methods is not None 
+                                        and method_name in self._Methods)
+                            or
+                                (hasattr(item, "__doc__") 
+                                        and item.__doc__ == _WebMethodSignature)
+                            ):
+                            method = item
+                    elif self._Methods is None or method_name in self._Methods:
+                        method = item
 
         if method is None:
             return HTTPNotFound("Invalid path %s" % (path,))
@@ -420,7 +456,10 @@ class WebPieApp:
         self.Script = environ.get('SCRIPT_FILENAME', 
                     os.environ.get('UWSGI_SCRIPT_FILENAME'))
         self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
-        root = self.RootClass(req, self, "/")
+        try:    
+            root = self.RootClass(req, self)
+        except:
+            root = self.RootClass(req, self, "/")
         try:
             return root.wsgi_call(environ, start_response)
         except:
@@ -449,9 +488,9 @@ class WebPieApp:
 
     def run_server(self, port, url_pattern="*"):
         from .HTTPServer import HTTPServer
-	    srv = HTTPServer(port, self, url_pattern=url_pattern)
-	    srv.start()
-	    srv.join()
+        srv = HTTPServer(port, self, url_pattern=url_pattern)
+        srv.start()
+        srv.join()
 
         
 if __name__ == '__main__':
