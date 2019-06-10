@@ -3,7 +3,7 @@ from socket import *
 from pythreader import PyThread, synchronized, Task, TaskQueue
 from .WebPieApp import Response
 
-Debug = True
+Debug = False
         
 class BodyFile(object):
     
@@ -75,6 +75,7 @@ class HTTPConnection(Task):
         self.BodyLength = None
         self.BytesSent = 0
         self.ResponseStatus = None
+        self.OriginalPathInfo = self.PathInfo = None
         
     def debug(self, msg):
         if Debug:
@@ -98,10 +99,11 @@ class HTTPConnection(Task):
         self.RequestProtocol = words[2]
         self.URL = words[1]
         uwords = self.URL.split('?',1)
-        self.PathInfo = uwords[0]
-        if not self.Server.urlMatch(self.PathInfo):
+        self.OriginalPathInfo = request_path = uwords[0]
+        if not self.Server.urlMatch(request_path):
             self.shutdown()
             return
+        self.PathInfo = self.Server.rewritePath(request_path)
         if len(uwords) > 1: self.QueryString = uwords[1]
         #ignore HTTP protocol
         for h in lines[1:]:
@@ -302,8 +304,11 @@ class HTTPConnection(Task):
             self.debug("shutdown")
             if self.CSock != None:
                 self.debug("closing client socket")
-                self.CSock.shutdown(SHUT_RDWR)
-                self.CSock.close()
+                try:    
+                    self.CSock.shutdown(SHUT_RDWR)
+                    self.CSock.close()
+                except:
+                    pass
                 self.CSock = None
             if self.Server is not None:
                 self.Server.connectionClosed(self)
@@ -333,7 +338,8 @@ class HTTPServer(PyThread):
         "css":  "text/css"
     }
 
-    def __init__(self, port, app, url_pattern="*", max_connections = 100, enabled = True, max_queued = 100,
+    def __init__(self, port, app, remove_prefix = "", url_pattern="*", max_connections = 100, 
+                enabled = True, max_queued = 100,
                 logging = True, log_file = None, static_uri = "/static", static_location = "static"):
         PyThread.__init__(self)
         #self.debug("Server started")
@@ -346,6 +352,7 @@ class HTTPServer(PyThread):
         self.Connections = TaskQueue(max_connections, capacity = max_queued)
         self.StaticURI = static_uri
         self.StaticLocation = static_location
+        self.RemovePrefix = remove_prefix
         if enabled:
             self.enableServer()
         
@@ -368,6 +375,11 @@ class HTTPServer(PyThread):
 
     def urlMatch(self, path):
         return fnmatch.fnmatch(path, self.Match)
+        
+    def rewritePath(self, path):
+        if self.RemovePrefix and path.startswith(self.RemovePrefix):
+            path = path[len(self.RemovePrefix):]
+        return path
 
     def wsgi_app(self, env, start_response):
         return self.WSGIApp(env, start_response)

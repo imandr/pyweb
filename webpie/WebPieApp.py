@@ -488,9 +488,9 @@ class WebPieApp:
         t = self.JEnv.get_template(temp)
         return t.generate(self.addEnvironment(kv))
 
-    def run_server(self, port, url_pattern="*"):
+    def run_server(self, port, **args):
         from .HTTPServer import HTTPServer
-        srv = HTTPServer(port, self, url_pattern=url_pattern)
+        srv = HTTPServer(port, self, **args)
         srv.start()
         srv.join()
 
