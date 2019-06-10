@@ -17,6 +17,7 @@ _WebMethodSignature = "__WebPie:webmethod__"
 #
  
 def webmethod(permissions=None):
+    print("webmethod: permissions:", permissions)
     #
     # Usage:
     #
@@ -31,9 +32,10 @@ def webmethod(permissions=None):
     #       ...
     #
     def decorator(method):
+        print("decorator: permissions:", permissions)
         def decorated(handler, request, relpath, *params, **args):
-            if isinstance(permissions, str):
-                permissions = [permissions]
+            #if isinstance(permissions, str):
+            #    permissions = [permissions]
             if permissions is not None:
                 try:    roles = handler._roles(request, relpath)
                 except:

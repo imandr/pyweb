@@ -1,8 +1,9 @@
-import fnmatch, traceback, sys, select, time, os.path, stat
+import fnmatch, traceback, sys, select, time, os.path, stat, pprint
 from socket import *
 from pythreader import PyThread, synchronized, Task, TaskQueue
 from .WebPieApp import Response
 
+Debug = True
         
 class BodyFile(object):
     
@@ -74,6 +75,10 @@ class HTTPConnection(Task):
         self.BodyLength = None
         self.BytesSent = 0
         self.ResponseStatus = None
+        
+    def debug(self, msg):
+        if Debug:
+            print msg
 
     def parseRequest(self):
         #print("requestReceived:[%s]" % (self.RequestBuffer,))
@@ -294,9 +299,10 @@ class HTTPConnection(Task):
         
     def shutdown(self):
             self.Server.log(self.CAddr, self.RequestMethod, self.URL, self.ResponseStatus, self.BytesSent)
-            #self.debug("shutdown")
+            self.debug("shutdown")
             if self.CSock != None:
-                #self.debug("closing socket")
+                self.debug("closing client socket")
+                self.CSock.shutdown(SHUT_RDWR)
                 self.CSock.close()
                 self.CSock = None
             if self.Server is not None:
@@ -314,7 +320,7 @@ class HTTPConnection(Task):
                 self.doWrite()
             if self.OutputEnabled and not self.OutBuffer and self.OutIterable is None:
                 self.shutdown()     # noting else to send
-
+                
 class HTTPServer(PyThread):
 
     MIME_TYPES_BASE = {
@@ -350,6 +356,15 @@ class HTTPServer(PyThread):
         ))
         if self.LogFile is sys.stdout:
             self.LogFile.flush()
+            
+    @synchronized
+    def log_error(self, caddr, message):
+        self.LogFile.write("{}: {} {}\n".format(
+                time.ctime(), caddr[0], message
+        ))
+        if self.LogFile is sys.stdout:
+            self.LogFile.flush()
+        
 
     def urlMatch(self, path):
         return fnmatch.fnmatch(path, self.Match)
@@ -379,7 +394,14 @@ class HTTPServer(PyThread):
         self.Sock.listen(10)
         while True:
             csock, caddr = self.Sock.accept()
-            self.Connections << HTTPConnection(self, csock, caddr)
+            conn = self.createConnection(csock, caddr)
+            if conn is not None:
+                self.Connections << conn
+
+    # overridable
+    def createConnection(self, csock, caddr):
+        return HTTPConnection(self, csock, caddr)
+
                 
     def isStaticURI(self, uri):
         return self.StaticURI is not None and uri.startswith(self.StaticURI + "/")
@@ -411,6 +433,28 @@ class HTTPServer(PyThread):
             
         return Response(app_iter = read_iter(open(path, "rb")),
             content_type = mime_type)
+            
+class HTTPSServer(HTTPServer):
+
+    def __init__(self, port, app, certfile, keyfile, password=None, **args):
+        HTTPServer.__init__(self, port, app, **args)
+        import ssl
+        self.SSLContext = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        self.SSLContext.load_cert_chain(certfile, keyfile, password=password)
+        self.SSLContext.verify_mode = ssl.CERT_OPTIONAL
+        self.SSLContext.load_default_certs()
+        
+    def createConnection(self, csock, caddr):
+        from ssl import SSLError
+        try:    
+            tls_socket = self.SSLContext.wrap_socket(csock, server_side=True)
+        except SSLError as e:
+            self.log_error(caddr, str(e))
+            csock.close()
+            return None
+        else:
+            pprint.pprint(tls_socket.getpeercert())
+            return HTTPConnection(self, tls_socket, caddr)
             
 
 def run_server(port, app, url_pattern="*"):
