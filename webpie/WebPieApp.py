@@ -222,8 +222,8 @@ class WebPieHandler:
                 self.redirect("index")
         else:
             item_name = path_down[0]
-            path_down = path_down[1:]
             if hasattr(self, item_name):
+                path_down = path_down[1:]
                 item = getattr(self, item_name)
                 if isinstance(item, WebPieHandler):
                     if path_to[-1] != '/':  path_to += '/'
@@ -243,7 +243,9 @@ class WebPieHandler:
                             method = item
                     elif self._Methods is None or method_name in self._Methods:
                         method = item
-
+            elif hasattr(self, "__call__"):
+                method = self       # there is no path down, but the Handler object itself is callable
+                
         if method is None:
             return HTTPNotFound("Invalid path %s" % (path,))
         
@@ -392,16 +394,46 @@ class WebPieHandler:
     @property
     def session(self):
         return self.Request.environ["webpie.session"]
-    
+        
+class WebPieStaticHandler(WebPieHandler):
+
+    def __call__(self, req, relpath, **args):
+        while ".." in relpath:
+            relpath = relpath.replace("..",".")
+        home = self.App.StaticRoot
+        path = os.path.join(home, relpath)
+        try:
+            st_mode = os.stat(path).st_mode
+            if not stat.S_ISREG(st_mode):
+                #print "not a regular file"
+                raise ValueError("Not regular file")
+        except:
+            #raise
+            return Response("Not found", status=404)
+
+        ext = path.rsplit('.',1)[-1]
+        mime_type = self.MIME_TYPES_BASE.get(ext, "text/html")
+
+        def read_iter(f):
+            while True:
+                data = f.read(100000)
+                if not data:    break
+                yield data
+
+        return Response(app_iter = read_iter(open(path, "rb")),
+            content_type = mime_type)
+        
 class WebPieApp:
 
     Version = "Undefined"
 
-    def __init__(self, root_class, strict=False):
+    def __init__(self, root_class, strict=False, static_root=None):
         self.RootClass = root_class
         self.JEnv = None
         self._AppLock = RLock()
         self._Strict = strict
+        self.ScriptHome = None
+        self.StaticRoot = static_root
 
     def _app_lock(self):
         return self._AppLock
@@ -458,6 +490,10 @@ class WebPieApp:
         self.Script = environ.get('SCRIPT_FILENAME', 
                     os.environ.get('UWSGI_SCRIPT_FILENAME'))
         self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
+        if not self.StaticRoot:
+            self.StaticRoot = self.ScriptHome + "/static"
+        elif self.StaticRoot[0] != "/":
+            self.StaticRoot = self.ScriptHome + '/' + self.StaticRoot
         try:    
             root = self.RootClass(req, self)
         except:

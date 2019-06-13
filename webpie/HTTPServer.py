@@ -213,17 +213,12 @@ class HTTPConnection(Task):
         
         
         try:
-            if self.Server.isStaticURI(self.PathInfo):
-                response = self.Server.processStaticRequest(env, self.PathInfo, self.start_response)
-                self.OutIterable = response(env, self.start_response)
-            else:
-                self.OutIterable = self.Server.wsgi_app(env, self.start_response)    
-                #print("OutIterabe:", self.OutIterable)
+            self.OutIterable = self.Server.wsgi_app(env, self.start_response)    
         except:
-                self.start_response("500 Error", 
-                                [("Content-Type","text/plain")])
-                self.OutBuffer = error = traceback.format_exc()
-                self.Server.log_error(self.CAddr, error)
+            self.start_response("500 Error", 
+                            [("Content-Type","text/plain")])
+            self.OutBuffer = error = traceback.format_exc()
+            self.Server.log_error(self.CAddr, error)
         self.OutputEnabled = True
         #self.debug("registering for writing: %s" % (self.CSock.fileno(),))    
 
@@ -341,7 +336,7 @@ class HTTPServer(PyThread):
 
     def __init__(self, port, app, remove_prefix = "", url_pattern="*", max_connections = 100, 
                 enabled = True, max_queued = 100,
-                logging = True, log_file = None, static_uri = "/static", static_location = "static"):
+                logging = True, log_file = None):
         PyThread.__init__(self)
         #self.debug("Server started")
         self.Port = port
@@ -351,8 +346,6 @@ class HTTPServer(PyThread):
         self.Logging = logging
         self.LogFile = sys.stdout if log_file is None else log_file
         self.Connections = TaskQueue(max_connections, capacity = max_queued)
-        self.StaticURI = static_uri
-        self.StaticLocation = static_location
         self.RemovePrefix = remove_prefix
         if enabled:
             self.enableServer()
@@ -423,6 +416,7 @@ class HTTPServer(PyThread):
 
                 
     def isStaticURI(self, uri):
+        return False
         return self.StaticURI is not None and uri.startswith(self.StaticURI + "/")
         
     def processStaticRequest(self, env, path, start_response):
