@@ -222,7 +222,8 @@ class HTTPConnection(Task):
         except:
                 self.start_response("500 Error", 
                                 [("Content-Type","text/plain")])
-                self.OutBuffer = traceback.format_exc()
+                self.OutBuffer = error = traceback.format_exc()
+                self.Server.log_error(self.CAddr, error)
         self.OutputEnabled = True
         #self.debug("registering for writing: %s" % (self.CSock.fileno(),))    
 
@@ -358,19 +359,25 @@ class HTTPServer(PyThread):
         
     @synchronized
     def log(self, caddr, method, uri, status, bytes_sent):
-        self.LogFile.write("{}: {} {} {} {} {}\n".format(
-                time.ctime(), caddr[0], method, uri, status, bytes_sent
-        ))
-        if self.LogFile is sys.stdout:
-            self.LogFile.flush()
+        if self.Logging:
+            self.LogFile.write("{}: {} {} {} {} {}\n".format(
+                    time.ctime(), caddr[0], method, uri, status, bytes_sent
+            ))
+            if self.LogFile is sys.stdout:
+                self.LogFile.flush()
             
     @synchronized
     def log_error(self, caddr, message):
-        self.LogFile.write("{}: {} {}\n".format(
-                time.ctime(), caddr[0], message
-        ))
-        if self.LogFile is sys.stdout:
-            self.LogFile.flush()
+        if self.Logging:
+            self.LogFile.write("{}: {} {}\n".format(
+                    time.ctime(), caddr[0], message
+            ))
+            if self.LogFile is sys.stdout:
+                self.LogFile.flush()
+        else:
+            print ("{}: {} {}\n".format(
+                    time.ctime(), caddr[0], message
+            ))
         
 
     def urlMatch(self, path):
