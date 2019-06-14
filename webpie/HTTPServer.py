@@ -76,6 +76,7 @@ class HTTPConnection(Task):
         self.BytesSent = 0
         self.ResponseStatus = None
         self.OriginalPathInfo = self.PathInfo = None
+        self.ValidRequest = False
         
     def debug(self, msg):
         if Debug:
@@ -87,22 +88,19 @@ class HTTPConnection(Task):
         lines = self.RequestBuffer.split('\n')
         lines = [l.strip() for l in lines if l.strip()]
         if not lines:
-            self.shutdown()
-            return
+            return False
         self.RequestHeadline = lines[0].strip()
         words = self.RequestHeadline.split()
         #self.debug("Request: %s" % (words,))
         if len(words) != 3:
-            self.shutdown()
-            return
+            return False
         self.RequestMethod = words[0].upper()
         self.RequestProtocol = words[2]
         self.URL = words[1]
         uwords = self.URL.split('?',1)
         self.OriginalPathInfo = request_path = uwords[0]
         if not self.Server.urlMatch(request_path):
-            self.shutdown()
-            return
+            return False
         self.PathInfo = self.Server.rewritePath(request_path)
         if len(uwords) > 1: self.QueryString = uwords[1]
         #ignore HTTP protocol
@@ -115,6 +113,7 @@ class HTTPConnection(Task):
             if name:
                 self.Headers.append((name, value))
                 self.HeadersDict[name] = value
+        return True
         
     def getHeader(self, header, default = None):
         # case-insensitive version of dictionary lookup
@@ -147,11 +146,11 @@ class HTTPConnection(Task):
             
         rest = self.RequestBuffer[inx+n:]
         self.RequestBuffer = self.RequestBuffer[:inx]
-        self.parseRequest()
+        self.ValidRequest = self.parseRequest()
         #print("rest:[{}]".format(rest))
-        if rest:    
+        if self.ValidRequest and rest:    
             self.addToBody(rest)
-        return True
+        return True                     # request received, even if it is invalid
             
     def addToBody(self, data):
         if isinstance(data, str):   data = bytes(data, "utf-8")
@@ -254,7 +253,10 @@ class HTTPConnection(Task):
             self.ReadClosed = True
             
         if request_just_received:
-            self.processRequest()
+            if self.ValidRequest:
+                self.processRequest()
+            else:
+                self.shutdown()
 
         if self.ReadClosed and not self.RequestReceived:
             self.shutdown()

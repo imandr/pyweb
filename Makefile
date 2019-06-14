@@ -6,6 +6,9 @@ all:
 	make VERSION=`python webpie/Version.py` all_with_version_defined
 	
 clean:
+	make VERSION=`python webpie/Version.py` clean_with_version_defined
+
+clean_with_version_defined:
 	rm -rf $(BUILD_DIR) $(TAR_FILE)
 
 all_with_version_defined:	tarball
