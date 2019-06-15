@@ -17,7 +17,6 @@ _WebMethodSignature = "__WebPie:webmethod__"
 #
  
 def webmethod(permissions=None):
-    print("webmethod: permissions:", permissions)
     #
     # Usage:
     #
@@ -32,7 +31,6 @@ def webmethod(permissions=None):
     #       ...
     #
     def decorator(method):
-        print("decorator: permissions:", permissions)
         def decorated(handler, request, relpath, *params, **args):
             #if isinstance(permissions, str):
             #    permissions = [permissions]
@@ -431,6 +429,12 @@ class WebPieApp:
 
     def _app_lock(self):
         return self._AppLock
+        
+    def __enter__(self):
+        return self._AppLock.__enter__()
+        
+    def __exit__(self, *params):
+        return self._AppLock.__exit(*params)
     
     # override
     @app_synchronized
