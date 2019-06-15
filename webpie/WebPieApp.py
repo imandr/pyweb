@@ -96,16 +96,6 @@ class WebPieHandler:
 
     Version = ""
 
-    MIME_TYPES_BASE = {
-        "gif":   "image/gif",
-        "jpg":   "image/jpeg",
-        "jpeg":   "image/jpeg",
-        "js":   "text/javascript",
-        "html":   "text/html",
-        "txt":   "text/plain",
-        "css":  "text/css"
-    }
-
     _Methods = None
     
     def __init__(self, request, app, path = None):
@@ -427,13 +417,17 @@ class WebPieApp:
 
     Version = "Undefined"
 
-    def __init__(self, root_class, strict=False, static_root=None):
+    def __init__(self, root_class, strict=False, 
+            static_path="/static", static_location="./static", enable_static=True):
         self.RootClass = root_class
         self.JEnv = None
         self._AppLock = RLock()
         self._Strict = strict
         self.ScriptHome = None
-        self.StaticRoot = static_root
+        self.StaticPath = static_path
+        self.StaticLocation = static_location
+        self.StaticEnabled = enable_static and static_location
+        self.Initialized = False
 
     def _app_lock(self):
         return self._AppLock
@@ -480,30 +474,73 @@ class WebPieApp:
         #print exc_text
         return Response(text, status = '500 Application Error')
 
+    MIME_TYPES_BASE = {
+        "gif":   "image/gif",
+        "jpg":   "image/jpeg",
+        "jpeg":   "image/jpeg",
+        "js":   "text/javascript",
+        "html":   "text/html",
+        "txt":   "text/plain",
+        "css":  "text/css"
+    }
+
+    def static(self, relpath):
+        while ".." in relpath:
+            relpath = relpath.replace("..",".")
+        home = self.StaticLocation
+        path = os.path.join(home, relpath)
+        #print "static: path=", path
+        try:
+            st_mode = os.stat(path).st_mode
+            if not stat.S_ISREG(st_mode):
+                #print "not a regular file"
+                raise ValueError("Not regular file")
+        except:
+            #raise
+            return Response("Not found", status=404)
+
+        ext = path.rsplit('.',1)[-1]
+        mime_type = self.MIME_TYPES_BASE.get(ext, "text/html")
+
+        def read_iter(f):
+            while True:
+                data = f.read(100000)
+                if not data:    break
+                yield data
+        #print "returning response..."
+        return Response(app_iter = read_iter(open(path, "rb")),
+            content_type = mime_type)
+
     def __call__(self, environ, start_response):
         #print 'app call ...'
         path_to = '/'
         path_down = environ.get('PATH_INFO', '')
         #print 'path:', path_down
         req = Request(environ)
-        self.ScriptName = environ.get('SCRIPT_NAME','')
-        self.Script = environ.get('SCRIPT_FILENAME', 
-                    os.environ.get('UWSGI_SCRIPT_FILENAME'))
-        self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
-        if not self.StaticRoot:
-            self.StaticRoot = self.ScriptHome + "/static"
-        elif self.StaticRoot[0] != "/":
-            self.StaticRoot = self.ScriptHome + '/' + self.StaticRoot
-        try:    
-            root = self.RootClass(req, self)
-        except:
-            root = self.RootClass(req, self, "/")
-        try:
-            return root.wsgi_call(environ, start_response)
-        except:
-            resp = self.applicationErrorResponse(
-                "Uncaught exception", sys.exc_info())
-            return resp(environ, start_response)
+        if not self.Initialized:
+            self.ScriptName = environ.get('SCRIPT_NAME','')
+            self.Script = environ.get('SCRIPT_FILENAME', 
+                        os.environ.get('UWSGI_SCRIPT_FILENAME'))
+            self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
+            if self.StaticEnabled:
+                if not self.StaticLocation[0] in ('.', '/'):
+                    self.StaticLocation = self.ScriptHome + "/" + self.StaticLocation[1:]
+            self.Initialized = True
+            
+        if self.StaticEnabled and path_down.startswith(self.StaticPath+"/"):
+            path = path_down[len(self.StaticPath)+1:]
+            resp = self.static(path)
+        else:
+            try:    
+                root = self.RootClass(req, self)
+            except:
+                root = self.RootClass(req, self, "/")
+            try:
+                return root.wsgi_call(environ, start_response)
+            except:
+                resp = self.applicationErrorResponse(
+                    "Uncaught exception", sys.exc_info())
+        return resp(environ, start_response)
         
     def JinjaGlobals(self):
         # override me

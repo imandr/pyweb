@@ -8,14 +8,10 @@ class MyApp(WebPieApp):
     
 class TopHandler(WebPieHandler):
     
-    def __init__(self, request, app, path):
-        WebPieHandler.__init__(self, request, app, path)
-        self.static = WebPieStaticHandler(request, app, "/static")
-        
     def hello(self, request, relpath, **args):
         return "Hello world!", "text/plain"
         
-app = MyApp(TopHandler)
+app = MyApp(TopHandler, static_location="static", static_path="/s")
 
 print("Server is listening at port 8001...")
 run_server(8001, app)
