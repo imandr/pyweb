@@ -80,7 +80,7 @@ class HTTPConnection(Task):
         
     def debug(self, msg):
         if Debug:
-            print msg
+            print (msg)
 
     def parseRequest(self):
         #print("requestReceived:[%s]" % (self.RequestBuffer,))

@@ -10,16 +10,12 @@ class Handler(WebPieHandler):
     
     @app_synchronized
     def set(self, req, relpath, name=None, value=None, **args):
-        print "value=%s %s" % (type(value), value)
-        self.App.Memory[name]=str(value)
-        return "OK"
+        self.App.Memory[name]=value
         
     @app_synchronized
     def get(self, req, relpath, name=None, **args):
-        value = self.App.Memory.get(name, "(undefined)")
-        print value
-        return value
+        return self.App.Memory.get(name, "(undefined)")
         
 application = MyApp(Handler)
-application.run_server(8001)
+application.run_server(8002)
 
