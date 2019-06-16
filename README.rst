@@ -375,6 +375,7 @@ method, any other handler thread will block before entering any decorated method
 For example:
 
 .. code-block:: python
+
 	from webpie import WebPieApp, WebPieHandler, app_synchronized
 
 	class MyApp(WebPieApp):
