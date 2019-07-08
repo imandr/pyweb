@@ -3,6 +3,10 @@ from socket import *
 from pythreader import PyThread, synchronized, Task, TaskQueue
 from .WebPieApp import Response
 
+PY2 = sys.version_info[0] == 2
+PY3 = sys.version_info[0] == 3
+
+
 Debug = False
         
 class BodyFile(object):
@@ -153,7 +157,7 @@ class HTTPConnection(Task):
         return True                     # request received, even if it is invalid
             
     def addToBody(self, data):
-        if isinstance(data, str):   data = bytes(data, "utf-8")
+        if PY3 and isinstance(data, str):   data = bytes(data)
         #print ("addToBody:", data)
         self.Body.append(data)
 
@@ -236,7 +240,7 @@ class HTTPConnection(Task):
 
         try:    
             data = self.CSock.recv(self.MAXMSG)
-            data = data.decode("utf-8")
+            if PY3:	data = data.decode("utf-8")
         except: 
             data = ""
         
