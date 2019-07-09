@@ -2,7 +2,7 @@ from .webob import Response
 from .webob import Request as webob_request
 from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPForbidden, HTTPNotFound
     
-import os.path, os, stat, sys, traceback
+import os.path, os, stat, sys, traceback, fnmatch
 from threading import RLock
 
 try:
@@ -56,9 +56,7 @@ def app_synchronized(method):
             return method(self, *params, **args)
     return synchronized_method
 
-
-
-
+atomic = app_synchronized
 
 class Request(webob_request):
     def __init__(self, *agrs, **kv):
@@ -90,20 +88,94 @@ class HTTPResponseException(Exception):
     def __init__(self, response):
         self.value = response
 
-class WebPieHandler:
+
+def makeResponse(resp):
+    #
+    # acceptable responses:
+    #
+    # Response
+    # text              -- ala Flask
+    # (text, status)            
+    # (text, "content_type")            
+    # (text, {headers})            
+    # (text, status, "content_type")
+    # (text, status, {headers})
+    #
+    
+    if isinstance(resp, Response):
+        return resp
+    
+    body_or_iter = None
+    content_type = None
+    status = None
+    extra = None
+    if isinstance(resp, tuple) and len(resp) == 2:
+        body_or_iter, extra = resp
+    elif isinstance(resp, tuple) and len(resp) == 3:
+        body_or_iter, status, extra = resp
+    elif isinstance(resp, (str, bytes, unicode)):
+        body_or_iter = resp
+    elif isinstance(resp, Iterable):
+        body_or_iter = resp
+    else:
+        raise ValueError("Handler method returned uninterpretable value: " + repr(resp))
+        
+    response = Response()
+    
+    if isinstance(body_or_iter, str):
+        if sys.version_info >= (3,):
+            response.text = body_or_iter
+        else:
+            response.text = unicode(body_or_iter, "utf-8")
+    elif isinstance(body_or_iter, bytes):
+        response.body = body_or_iter
+    elif isinstance(body_or_iter, Iterable):
+        response.app_iter = body_or_iter
+    else:
+        raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
+
+    #print "makeResponse: extra: %s %s is str:%s" % (type(extra), extra, isinstance(extra, str))
+    
+    if status is not None:
+        response.status = status
+     
+    if extra is not None:
+        if isinstance(extra, dict):
+            response.headers = extra
+        elif isinstance(extra, str):
+            response.content_type = extra
+        elif isinstance(extra, int):
+            #print "makeResponse: setting status to %s" % (extra,)
+            response.status = extra
+        else:
+            raise ValueError("Unknown type for headers: " + repr(extra))
+#print response
+    
+    return response
+
+
+class WPHandler:
 
     Version = ""
 
     _Methods = None
     
-    def __init__(self, request, app, path = None):
+    def __init__(self, request, app):
         self.App = app
-        self.Request = request
-        self.Path = path
         self.BeingDestroyed = False
         self.AppURL = request.application_url
+        self.RouteMap = []
+        self.Request = request
         #print "Handler created"
 
+    def addHandler(self, pattern, handler, status=200, content_type="text/plain"):
+        if isinstance(handler, WPHandler):
+            self.RouteMap.append((pattern, handler))
+        elif callable(handler):
+            self.addHandler(pattern, WPLambdaHandler(self.Request, self.App, handler))
+        elif isinstance(handler, (str, unicode)):
+            self.addHandler(pattern, WPResponder(self.Request, self.App, handler, status, content_type))
+            
     def _app_lock(self):
         return self.App._app_lock()
 
@@ -111,70 +183,6 @@ class WebPieHandler:
         # override me
         pass
 
-    def myUri(self, down=None):
-        #ret = "%s/%s" % (self.AppURI,self.MyPath)
-        ret = self.MyPath
-        if down:
-            ret = "%s/%s" % (ret, down)
-        return ret
-
-    def makeResponse(self, resp):
-        #
-        # acceptable responses:
-        #
-        # Response
-        # text              -- ala Flask
-        # (text, status)            
-        # (text, "content_type")            
-        # (text, {headers})            
-        # (text, status, "content_type")
-        # (text, status, {headers})
-        #
-        
-        if isinstance(resp, Response):
-            return resp
-        
-        body_or_iter = None
-        content_type = None
-        status = None
-        extra = None
-        if isinstance(resp, tuple) and len(resp) == 2:
-            body_or_iter, extra = resp
-        elif isinstance(resp, tuple) and len(tuple) == 3:
-            body_or_iter, status, extra = resp
-        elif isinstance(resp, (str, bytes, unicode)):
-            body_or_iter = resp
-        elif isinstance(resp, Iterable):
-            body_or_iter = resp
-        else:
-            raise ValueError("Handler method returned uninterpretable value: " + repr(resp))
-            
-        response = Response()
-        
-        if isinstance(body_or_iter, str):
-            if sys.version_info >= (3,):
-                response.text = body_or_iter
-            else:
-                response.text = unicode(body_or_iter, "utf-8")
-        elif isinstance(body_or_iter, bytes):
-            response.body = body_or_iter
-        elif isinstance(body_or_iter, Iterable):
-            response.app_iter = body_or_iter
-        else:
-            raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
-            
-        if extra is not None:
-            if isinstance(extra, dict):
-                response.headers = extra
-            elif isinstance(extra, str):
-                response.content_type = extra
-            elif isinstance(extra, int):
-                response.status = extra
-            else:
-                raise ValueError("Unknown type for headers: " + repr(extra))
-	#print response
-        
-        return response
         
     def wsgi_call(self, environ, start_response):
         path_to = '/'
@@ -204,35 +212,43 @@ class WebPieHandler:
         self.Path = path_to
         while path_down and not path_down[0]:
             path_down = path_down[1:]
-        method = None
         if not path_down:
             if hasattr(self, "index"):
-                self.redirect("index")
-        else:
-            item_name = path_down[0]
-            if hasattr(self, item_name):
-                path_down = path_down[1:]
-                item = getattr(self, item_name)
-                if isinstance(item, WebPieHandler):
-                    if path_to[-1] != '/':  path_to += '/'
-                    path_to += item_name
-                    return item.walk_down(environ, path, path_to, path_down)
-                else:
-                    method_name = item_name
-                    method = None
-                    if self.App._Strict:
-                        if (
-                                (self._Methods is not None 
-                                        and method_name in self._Methods)
-                            or
-                                (hasattr(item, "__doc__") 
-                                        and item.__doc__ == _WebMethodSignature)
-                            ):
-                            method = item
-                    elif self._Methods is None or method_name in self._Methods:
+                return self.redirect("index")
+            else:
+                return HTTPNotFound("Invalid path %s" % (path,))
+                
+        method = None
+        item_name = path_down[0]
+        if hasattr(self, item_name):
+            path_down = path_down[1:]
+            item = getattr(self, item_name)
+            if isinstance(item, WebPieHandler):
+                if path_to[-1] != '/':  path_to += '/'
+                path_to += item_name
+                return item.walk_down(environ, path, path_to, path_down)
+            else:
+                method_name = item_name
+                method = None
+                if self.App._Strict:
+                    if (
+                            (self._Methods is not None 
+                                    and method_name in self._Methods)
+                        or
+                            (hasattr(item, "__doc__") 
+                                    and item.__doc__ == _WebMethodSignature)
+                        ):
                         method = item
-            elif hasattr(self, "__call__"):
-                method = self       # there is no path down, but the Handler object itself is callable
+                elif self._Methods is None or method_name in self._Methods:
+                    method = item
+        else:
+            relpath = "/".join(path_down)
+            for pattern, handler in self.RouteMap:
+                if fnmatch.fnmatch(pattern, relpath):
+                    return handler.walk_down(environ, path, path_to, path_down)
+                    
+        if method is None and hasattr(self, "__call__"):
+            method = self       # there is no path down, but the Handler object itself is callable
                 
         if method is None:
             return HTTPNotFound("Invalid path %s" % (path,))
@@ -252,7 +268,7 @@ class WebPieHandler:
             response = req.getResponse()    # legacy
 
         try:    
-            response = self.makeResponse(response)
+            response = makeResponse(response)
         except ValueError as e:
             response = self.App.applicationErrorResponse(str(e), sys.exc_info())
     
@@ -365,7 +381,6 @@ class WebPieHandler:
     def uriDir(self, ignored=None):
         return os.path.dirname(self.scriptUri())
         
-
     def renderTemplate(self, ignored, template, _dict = {}, **args):
         # backward compatibility method
         params = {}
@@ -382,13 +397,40 @@ class WebPieHandler:
     @property
     def session(self):
         return self.Request.environ["webpie.session"]
+
+class WPLambdaHandler(WPHandler):
+    
+    def __init__(self, request, app, callable):
+        WPHandler.__init__(self, request, app)
+        self.F = callable
         
-class WebPieApp:
+    def __call__(self, req, relpath, **args):
+        return self.F(req, relpath, **args)
+        
+class WPResponder(WPHandler):
+    
+    def __init__(self, request, app, body, status=200, content_type="text/plain"):
+        WPHandler.__init__(self, request, app)
+        self.Response = makeResponse((body, status, content_type))
+        #print "Responder: status=%s" % (status,)
+        #print self.Response, self.Response.status
+        
+    def __call__(self, req, relpath, **args):
+        return self.Response
+        
+class WebPieHandler(WPHandler):     # for compatibility. Migrate to WPHandler
+    
+    def __init__(self, request, app, path = None):
+        WPHandler.__init__(self, request, app)
+        self.Path = path
+        
+class WPApp:
 
     Version = "Undefined"
 
     def __init__(self, root_class, strict=False, 
             static_path="/static", static_location="./static", enable_static=True):
+        assert issubclass(root_class, WPHandler)
         self.RootClass = root_class
         self.JEnv = None
         self._AppLock = RLock()
@@ -507,10 +549,14 @@ class WebPieApp:
             path = path_down[len(self.StaticPath)+1:]
             resp = self.static(path)
         else:
-            try:    
-                root = self.RootClass(req, self)
-            except:
-                root = self.RootClass(req, self, "/")
+            if issubclass(self.RootClass, WebPieHandler):
+                try:    
+                    root = self.RootClass(req, self)
+                except:
+                    raise
+                    root = self.RootClass(req, self, "/")
+            else:
+                root = RootClass(self)
             try:
                 return root.wsgi_call(environ, start_response)
             except:
@@ -543,6 +589,7 @@ class WebPieApp:
         srv.start()
         srv.join()
 
+WebPieApp = WPApp
         
 if __name__ == '__main__':
     from HTTPServer import HTTPServer
