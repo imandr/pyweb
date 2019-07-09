@@ -255,12 +255,9 @@ class WPHandler:
         
         req = Request(environ)
         relpath = "/".join(path_down)
-        args = environ["query_dict"]
-        #for k in req.GET.keys():
-        #    v = req.GET.getall(k)
-        #    if isinstance(v, list) and len(v) == 1:
-        #        v = v[0]
-        #    args[k] = v
+        #args = environ["query_dict"]
+        args = {}
+        args = req.GET.mixed()
             
         response = method(req, relpath, **args)
         #print resp
@@ -429,7 +426,8 @@ class WPApp:
     Version = "Undefined"
 
     def __init__(self, root_class, strict=False, 
-            static_path="/static", static_location="./static", enable_static=True):
+            static_path="/static", static_location="static", enable_static=True,
+            disable_robots=True):
         assert issubclass(root_class, WPHandler)
         self.RootClass = root_class
         self.JEnv = None
@@ -440,6 +438,7 @@ class WPApp:
         self.StaticLocation = static_location
         self.StaticEnabled = enable_static and static_location
         self.Initialized = False
+        self.DisableRobots = disable_robots
 
     def _app_lock(self):
         return self._AppLock
@@ -542,12 +541,15 @@ class WPApp:
             self.ScriptHome = os.path.dirname(self.Script or sys.argv[0]) or "."
             if self.StaticEnabled:
                 if not self.StaticLocation[0] in ('.', '/'):
-                    self.StaticLocation = self.ScriptHome + "/" + self.StaticLocation[1:]
+                    self.StaticLocation = self.ScriptHome + "/" + self.StaticLocation
+                    #print "static location:", self.StaticLocation
             self.Initialized = True
             
         if self.StaticEnabled and path_down.startswith(self.StaticPath+"/"):
             path = path_down[len(self.StaticPath)+1:]
             resp = self.static(path)
+        elif self.DisableRobots and path_down.endswith("/robots.txt"):
+            resp = Response("User-agent: *\nDisallow: /\n", content_type = "text/plain")
         else:
             if issubclass(self.RootClass, WebPieHandler):
                 try:    
