@@ -104,6 +104,7 @@ class WebPieHandler:
         self.Path = path
         self.BeingDestroyed = False
         self.AppURL = request.application_url
+	self.RouteMap = []
         #print "Handler created"
 
     def _app_lock(self):
@@ -112,6 +113,11 @@ class WebPieHandler:
     def initAtPath(self, path):
         # override me
         pass
+
+    def addHandler(self, pattern, handler):
+	assert isinstance(handler, WebPieHandler)
+	self.RouteMap.append((pattern, handler))
+
 
     def myUri(self, down=None):
         #ret = "%s/%s" % (self.AppURI,self.MyPath)
@@ -209,8 +215,9 @@ class WebPieHandler:
         method = None
         if not path_down:
             if hasattr(self, "index"):
-                self.redirect("index")
-        else:
+                return self.redirect("index")
+	    else:
+		    return HTTPNotFound("Invalid path %s" % (path,))
             item_name = path_down[0]
             if hasattr(self, item_name):
                 path_down = path_down[1:]
@@ -233,6 +240,13 @@ class WebPieHandler:
                             method = item
                     elif self._Methods is None or method_name in self._Methods:
                         method = item
+	    if method is None:
+		for pattern, handler in self.RouteMap:
+			if fnmatch.fnmatch(relpath, pattern):
+			    if path_to[-1] != '/':  path_to += '/'
+			    path_to += item_name
+			    return handler.walk_down(environ, path, path_to, path_down)
+				
             elif hasattr(self, "__call__"):
                 method = self       # there is no path down, but the Handler object itself is callable
                 
@@ -240,7 +254,6 @@ class WebPieHandler:
             return HTTPNotFound("Invalid path %s" % (path,))
         
         req = Request(environ)
-        relpath = "/".join(path_down)
         #args = environ["query_dict"]
         args = {}
         args = req.GET.mixed()
