@@ -5,6 +5,9 @@ from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPForb
 import os.path, os, stat, sys, traceback, fnmatch
 from threading import RLock
 
+PY2 = sys.version_info[0] == 2
+PY3 = sys.version_info[0] == 3
+
 try:
     from collections.abc import Iterable    # Python3
 except ImportError:
@@ -113,7 +116,9 @@ def makeResponse(resp):
         body_or_iter, extra = resp
     elif isinstance(resp, tuple) and len(resp) == 3:
         body_or_iter, status, extra = resp
-    elif isinstance(resp, (str, bytes, unicode)):
+    elif PY2 and isinstance(resp, (str, bytes, unicode)):
+        body_or_iter = resp
+    elif PY3 and isinstance(resp, (str, bytes)):
         body_or_iter = resp
     elif isinstance(resp, Iterable):
         body_or_iter = resp
