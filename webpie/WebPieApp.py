@@ -163,7 +163,8 @@ class WPHandler:
     def __init__(self, request, app):
         self.App = app
         self.BeingDestroyed = False
-        self.AppURL = request.application_url
+        try:    self.AppURL = request.application_url
+        except: self.AppURL = None
         self.RouteMap = []
         self.Request = request
 
@@ -188,7 +189,9 @@ class WPHandler:
         path = environ.get('PATH_INFO', '')
         path_down = path.split("/")
         try:
-            response = self.walk_down(environ, path, path_to, path_down)    
+            environ["query_dict"] = self.parseQuery(environ.get("QUERY_STRING", ""))
+            request = Request(environ)
+            response = self.walk_down(request, path_to, path_down)    
         except HTTPFound as val:    
             # redirect
             response = val
@@ -207,62 +210,79 @@ class WPHandler:
         self._destroy()
         return out
         
-    def walk_down(self, environ, path, path_to, path_down):
+    def parseQuery(self, query):
+        out = {}
+        for w in (query or "").split("&"):
+            if w:
+                words = w.split("=", 1)
+                k = words[0]
+                if k:
+                    v = None
+                    if len(words) > 1:  v = words[1]
+                    if k in out:
+                        old = out[k]
+                        if type(old) != type([]):
+                            old = [old]
+                            out[k] = old
+                        out[k].append(v)
+                    else:
+                        out[k] = v
+        return out
+        
+    def walk_down(self, request, path_to, path_down):
         self.Path = path_to
         while path_down and not path_down[0]:
             path_down = path_down[1:]
-            
-        if not path_down:
-            if hasattr(self, "index"):
-                return self.redirect("index")
-            else:
-                return HTTPNotFound("Invalid path %s" % (path,))
-                
-        method = None
-        item_name = path_down[0]
-        if hasattr(self, item_name):
-            path_down = path_down[1:]
-            item = getattr(self, item_name)
-            if isinstance(item, WebPieHandler):
-                if path_to[-1] != '/':  path_to += '/'
-                path_to += item_name
-                return item.walk_down(environ, path, path_to, path_down)
-            method_name = item_name
-            method = None
-            if self.App._Strict:
-                if (
-                        (self._Methods is not None 
-                                and method_name in self._Methods)
-                    or
-                        (hasattr(item, "__doc__") 
-                                and item.__doc__ == _WebMethodSignature)
-                    ):
-                    method = item
-            elif self._Methods is None or method_name in self._Methods:
-                method = item
-            relpath = "/".join(path_down)
-        else:
-            relpath = "/".join(path_down)
-            for pattern, handler in self.RouteMap:
-                if fnmatch.fnmatch(pattern, relpath):
-                    return handler.walk_down(environ, path, path_to, path_down)
-                    
-        if method is None and hasattr(self, "__call__"):
-            method = self       # there is no path down, but the Handler object itself is callable
-                
-        if method is None:
-            return HTTPNotFound("Invalid path %s" % (path,))
-        
-        req = Request(environ)
-        #args = environ["query_dict"]
-        args = {}
-        args = req.GET.mixed()
-            
-        response = method(req, relpath, **args)
-        #print resp
-        if response == None:        
-            response = req.getResponse()    # legacy
 
+        method = None
+        response = None
+        if not path_down:
+            # if empty path
+            if hasattr(self, "index"):                  # try index
+                response = self.redirect("index")
+            elif callable(self):                        # or __call__
+                response = self(request, "", **request.environ["query_dict"])
+        else:
+            item_name = path_down[0]
+            if hasattr(self, item_name):
+                path_down = path_down[1:]
+                item = getattr(self, item_name)
+                if isinstance(item, WPHandler):
+                    if path_to[-1] != '/':  path_to += '/'
+                    path_to += item_name
+                    response = item.walk_down(request, path_to, path_down)
+                elif callable(item):
+                    allowed = False
+                    if self.App._Strict:
+                        allowed = (
+                                (self._Methods is not None 
+                                        and item_name in self._Methods)
+                            or
+                                (hasattr(item, "__doc__") 
+                                        and item.__doc__ == _WebMethodSignature)
+                            )
+                    else:
+                        allowed = self._Methods is None or method_name in self._Methods
+                    if allowed:
+                        relpath = "/".join(path_down)
+                        response = item(request, relpath, **request.environ["query_dict"])
+                    else:
+                        return HTTPForbidden(request.path_info)
+            else:
+                relpath = "/".join(path_down)
+                for pattern, handler in self.RouteMap:
+                    if fnmatch.fnmatch(pattern, relpath):
+                        if path_to[-1] != '/':  path_to += '/'
+                        path_to += item_name
+                        response = handler.walk_down(request, path_to, path_down[1:])
+                    
+        if response is None and callable(self):
+            relpath = "/".join(path_down)
+            response = self(request, relpath, **request.environ["query_dict"])
+                    
+        if response is None:
+            return HTTPNotFound("Invalid path %s" % (request.path_info,))
+        
         try:    
             response = makeResponse(response)
         except ValueError as e:

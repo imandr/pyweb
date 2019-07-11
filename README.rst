@@ -367,37 +367,82 @@ objects are concurrently created in their own threads, one for each request, whe
 is shared by all the threads handling the requests. This feature makes it possible to use the App object for inter-handler
 synchronization. The App object has its own lock object and threads can use it in 2 different ways:
 
-app_synchronized decorator
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-Decorating a web method with "app_synchronized" decorator makes the web method "atomic" in the sense that if a handler thread enters such
-method, any other handler thread will block before entering any decorated method until the first thread returns from the method.
+atomic decorator
+~~~~~~~~~~~~~~~~
+Decorating a web method with "atomic" decorator makes the web method atomic in the sense that if a handler thread enters such
+a method, any other handler thread of the same application will block before entering any atomic method until the first thread returns from the method.
 
 For example:
 
 .. code-block:: python
 
-	from webpie import WebPieApp, WebPieHandler, app_synchronized
+	from webpie import WebPieApp, WebPieHandler, atomic
 
 	class MyApp(WebPieApp):
-
+    
 	    def __init__(self, root_class):
 	        WebPieApp.__init__(self, root_class)
 	        self.Memory = {}
-
+    
 	class Handler(WebPieHandler):
-
-	    @app_synchronized
+    
+	    @atomic
 	    def set(self, req, relpath, name=None, value=None, **args):
-	        print "value=%s %s" % (type(value), value)
-	        self.App.Memory[name]=str(value)
-	        return "OK"
-    
-	    @app_synchronized
+	        self.App.Memory[name]=value
+        
+	    @atomic
 	    def get(self, req, relpath, name=None, **args):
-	        value = self.App.Memory.get(name, "(undefined)")
-	        print value
-	        return value
-    
+	        return self.App.Memory.get(name, "(undefined)")
+        
 	application = MyApp(Handler)
-	application.run_server(8001)
+	application.run_server(8002)
+
+You can also decorate methods of the App. For example:
+
+.. code-block:: python
+
+	from webpie import WebPieApp, WebPieHandler, atomic
+
+	class MyApp(WebPieApp):
+    
+	    RecordSize = 10
+    
+	    def __init__(self, root_class):
+	        WebPieApp.__init__(self, root_class)
+	        self.Record = []
+        
+	    @atomic
+	    def add(self, value):
+	        if value in self.Record:
+	            self.Record.remove(value)
+	        self.Record.insert(0, value)
+	        if len(self.Record) > self.RecordSize:
+	            self.Record = self.Record[:self.RecordSize]
+        
+	    @atomic
+	    def find(self, value):
+	        try:    i = self.Record.index(value)
+	        except ValueError:
+	            return "not found"
+	        self.Record.pop(i)
+	        self.Record.insert(0, value)
+	        return str(i)
+        
+	class Handler(WebPieHandler):
+    
+	    def add(self, req, relpath, **args):
+	        return self.App.add(relpath)
+        
+	    def find(self, req, relpath, **args):
+	        return self.App.find(relpath)
+        
+	application = MyApp(Handler)
+	application.run_server(8002)
+
+
+App object as a context manager
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Another to implement a critical section is to use the App object as the context manager:
+
+
 
