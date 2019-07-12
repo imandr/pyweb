@@ -194,13 +194,14 @@ class WPHandler:
 
         
     def wsgi_call(self, environ, start_response):
-        path_to = '/'
+        # path_to = '/'
         path = environ.get('PATH_INFO', '')
         path_down = path.split("/")
         try:
-            environ["query_dict"] = self.parseQuery(environ.get("QUERY_STRING", ""))
+            args = self.parseQuery(environ.get("QUERY_STRING", ""))
             request = Request(environ)
-            response = self.walk_down(request, path_to, path_down)    
+            #response = self.walk_down(request, path_to, path_down)    
+            response = self.walk_down(request, path_down, args)    
         except HTTPFound as val:    
             # redirect
             response = val
@@ -213,7 +214,11 @@ class WPHandler:
         except:
             response = self.App.applicationErrorResponse(
                 "Uncaught exception", sys.exc_info())
-        
+
+        try:    
+            response = makeResponse(response)
+        except ValueError as e:
+            response = self.App.applicationErrorResponse(str(e), sys.exc_info())
         out = response(environ, start_response)
         self.destroy()
         self._destroy()
@@ -238,7 +243,7 @@ class WPHandler:
                         out[k] = v
         return out
         
-    def walk_down(self, request, path_to, path_down):
+    def ___walk_down(self, request, path_to, path_down):
         self.Path = path_to
         while path_down and not path_down[0]:
             path_down = path_down[1:]
@@ -299,7 +304,59 @@ class WPHandler:
     
         return response
                 
+    def walk_down(self, request, path_down, args):
+        
+        if not path_down:
+            if callable(self):
+                return self(request, "", **request["query_dict"])
+            else:
+                return HTTPNotFound("Invalid path %s" % (request.path_info,))
+        
+        top_path_item = path_down[0]
+        
+        # Try methods
+        method_name = top_path_item
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            if callable(method):
+                allowed = False
+                if self._Strict:
+                    allowed = (
+                            (self._Methods is not None 
+                                    and method_name in self._Methods)
+                        or
+                            (hasattr(method, "__doc__") 
+                                    and item.__doc__ == _WebMethodSignature)
+                        )
+                else:
+                    allowed = self._Methods is None or method_name in self._Methods
+                if allowed:
+                    relpath = "/".join(path_down[1:])
+                    return method(request, relpath, **args)
+                else:
+                    return HTTPForbidden(request.path_info)
+                
+        
+        # Try route map
+        path = "/".join(path_down)
+        for pattern, handler in self.RouteMap:
+            if fnmatch.fnmatch(pattern, path):
+                if issubclass(handler, WPHandler):
+                    child = handler(self.Request, self.App, self.Path + "/" + top_path_item)
+                    return child.walk_down(request, path_down[1:], args)
+                elif callable(handler):
+                    return handler(request, path, **args)
+                else:
+                    return handler
 
+        # Try callable
+        if callable(self):
+            return self(self.Request, path, **args)
+        
+        # ... otherwise ...
+        return HTTPNotFound("Invalid path %s" % (request.path_info,))
+                    
+        
     def hello(self, req, relpath):
         resp = Response("Hello")
         return resp
