@@ -163,28 +163,22 @@ def makeResponse(resp):
     return response
 
 
-class WPHandler:
+class WebPieHandler:
 
     Version = ""
-
+    
+    RouteMap = []
+    _Strict = False
     _Methods = None
     
-    def __init__(self, request, app):
+    def __init__(self, request, app, path):
+        self.Request = request
+        self.Path = path
         self.App = app
         self.BeingDestroyed = False
         try:    self.AppURL = request.application_url
         except: self.AppURL = None
-        self.RouteMap = []
-        self.Request = request
 
-    def addHandler(self, pattern, handler, status=200, content_type="text/plain"):
-        if isinstance(handler, WPHandler):
-            self.RouteMap.append((pattern, handler))
-        elif callable(handler):
-            self.addHandler(pattern, WPLambdaHandler(self.Request, self.App, handler))
-        elif isinstance(handler, (str, unicode)):
-            self.addHandler(pattern, WPResponder(self.Request, self.App, handler, status, content_type))
-            
     def _app_lock(self):
         return self.App._app_lock()
 
@@ -261,7 +255,7 @@ class WPHandler:
             if hasattr(self, item_name):
                 path_down = path_down[1:]
                 item = getattr(self, item_name)
-                if isinstance(item, WPHandler):
+                if isinstance(item, WebPieHandler):
                     if path_to[-1] != '/':  path_to += '/'
                     path_to += item_name
                     response = item.walk_down(request, path_to, path_down)
@@ -305,7 +299,10 @@ class WPHandler:
         return response
                 
     def walk_down(self, request, path_down, args):
-        
+
+        while path_down and not path_down[0]:
+            path_down = path_down[1:]
+    
         if not path_down:
             if callable(self):
                 return self(request, "", **request["query_dict"])
@@ -314,11 +311,15 @@ class WPHandler:
         
         top_path_item = path_down[0]
         
-        # Try methods
-        method_name = top_path_item
-        if hasattr(self, method_name):
-            method = getattr(self, method_name)
-            if callable(method):
+        # Try methods and members
+        if hasattr(self, top_path_item):
+            member = getattr(self, top_path_item)
+            if isinstance(member, WebPieHandler):
+                child = member
+                return child.walk_down(request, path_down[1:], args)
+            elif callable(member):
+                method_name = top_path_item
+                method = member
                 allowed = False
                 if self._Strict:
                     allowed = (
@@ -326,7 +327,7 @@ class WPHandler:
                                     and method_name in self._Methods)
                         or
                             (hasattr(method, "__doc__") 
-                                    and item.__doc__ == _WebMethodSignature)
+                                    and method.__doc__ == _WebMethodSignature)
                         )
                 else:
                     allowed = self._Methods is None or method_name in self._Methods
@@ -340,8 +341,10 @@ class WPHandler:
         # Try route map
         path = "/".join(path_down)
         for pattern, handler in self.RouteMap:
-            if fnmatch.fnmatch(pattern, path):
-                if issubclass(handler, WPHandler):
+            if fnmatch.fnmatch(pattern, path) or top_path_item == pattern:
+                try:    is_handler_class = issubclass(handler, WebPieHandler)
+                except: is_handler_class = False
+                if is_handler_class:
                     child = handler(self.Request, self.App, self.Path + "/" + top_path_item)
                     return child.walk_down(request, path_down[1:], args)
                 elif callable(handler):
@@ -479,41 +482,58 @@ class WPHandler:
     @property
     def session(self):
         return self.Request.environ["webpie.session"]
+        
+        
+class WebPieStaticHandler(WebPieHandler):
 
-class WPLambdaHandler(WPHandler):
-    
-    def __init__(self, request, app, callable):
-        WPHandler.__init__(self, request, app)
-        self.F = callable
-        
-    def __call__(self, req, relpath, **args):
-        return self.F(req, relpath, **args)
-        
-class WPResponder(WPHandler):
-    
-    def __init__(self, request, app, body, status=200, content_type="text/plain"):
-        WPHandler.__init__(self, request, app)
-        self.Response = makeResponse((body, status, content_type))
-        #print "Responder: status=%s" % (status,)
-        #print self.Response, self.Response.status
-        
-    def __call__(self, req, relpath, **args):
-        return self.Response
-        
-class WebPieHandler(WPHandler):     # for compatibility. Migrate to WPHandler
-    
-    def __init__(self, request, app, path = None):
-        WPHandler.__init__(self, request, app)
-        self.Path = path
-        
-class WPApp:
+    MIME_TYPES_BASE = {
+        "gif":   "image/gif",
+        "jpg":   "image/jpeg",
+        "jpeg":   "image/jpeg",
+        "js":   "text/javascript",
+        "html":   "text/html",
+        "txt":   "text/plain",
+        "css":  "text/css"
+    }
+
+    def __init__(self, root_path):
+        WebPieHandler.__init__(self, None, None, None)
+        self.RootPath = root_path
+
+    def __call__(self, request, relpath):
+        while ".." in relpath:
+            # prevent jumping up
+            relpath = relpath.replace("..",".")
+        home = self.RootPath
+        path = os.path.join(home, relpath)
+        print "path:", path
+        try:
+            st_mode = os.stat(path).st_mode
+            if not stat.S_ISREG(st_mode):
+                #print "not a regular file"
+                return Response(status=403)
+        except:
+            #raise
+            return Response("Not found", status=404)
+
+        ext = path.rsplit('.',1)[-1]
+        mime_type = self.MIME_TYPES_BASE.get(ext, "text/html")
+
+        def read_iter(f):
+            while True:
+                data = f.read(100000)
+                if not data:    break
+                yield data
+        return Response(app_iter = read_iter(open(path, "rb")), content_type = mime_type)
+
+class WebPieApp(object):
 
     Version = "Undefined"
 
     def __init__(self, root_class, strict=False, 
-            static_path="/static", static_location="static", enable_static=True,
+            static_path="/static", static_location="static", enable_static=False,
             disable_robots=True):
-        assert issubclass(root_class, WPHandler)
+        assert issubclass(root_class, WebPieHandler)
         self.RootClass = root_class
         self.JEnv = None
         self._AppLock = RLock()
@@ -576,16 +596,6 @@ class WPApp:
         #print exc_text
         return Response(text, status = '500 Application Error')
 
-    MIME_TYPES_BASE = {
-        "gif":   "image/gif",
-        "jpg":   "image/jpeg",
-        "jpeg":   "image/jpeg",
-        "js":   "text/javascript",
-        "html":   "text/html",
-        "txt":   "text/plain",
-        "css":  "text/css"
-    }
-
     def static(self, relpath):
         while ".." in relpath:
             relpath = relpath.replace("..",".")
@@ -637,11 +647,7 @@ class WPApp:
             resp = Response("User-agent: *\nDisallow: /\n", content_type = "text/plain")
         else:
             if issubclass(self.RootClass, WebPieHandler):
-                try:    
-                    root = self.RootClass(req, self)
-                except:
-                    raise
-                    root = self.RootClass(req, self, "/")
+                root = self.RootClass(req, self, "/")
             else:
                 root = RootClass(self)
             try:
@@ -676,8 +682,6 @@ class WPApp:
         srv.start()
         srv.join()
 
-WebPieApp = WPApp
-        
 if __name__ == '__main__':
     from HTTPServer import HTTPServer
     
