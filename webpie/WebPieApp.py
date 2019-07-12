@@ -98,6 +98,7 @@ def makeResponse(resp):
     #
     # Response
     # text              -- ala Flask
+    # status    
     # (text, status)            
     # (text, "content_type")            
     # (text, {headers})            
@@ -120,6 +121,8 @@ def makeResponse(resp):
         body_or_iter = resp
     elif PY3 and isinstance(resp, (str, bytes)):
         body_or_iter = resp
+    elif isinstance(resp, int):
+        status = resp
     elif isinstance(resp, Iterable):
         body_or_iter = resp
     else:
@@ -127,17 +130,18 @@ def makeResponse(resp):
         
     response = Response()
     
-    if isinstance(body_or_iter, str):
-        if sys.version_info >= (3,):
-            response.text = body_or_iter
+    if body_or_iter is not None:
+        if isinstance(body_or_iter, str):
+            if sys.version_info >= (3,):
+                response.text = body_or_iter
+            else:
+                response.text = unicode(body_or_iter, "utf-8")
+        elif isinstance(body_or_iter, bytes):
+            response.body = body_or_iter
+        elif isinstance(body_or_iter, Iterable):
+            response.app_iter = body_or_iter
         else:
-            response.text = unicode(body_or_iter, "utf-8")
-    elif isinstance(body_or_iter, bytes):
-        response.body = body_or_iter
-    elif isinstance(body_or_iter, Iterable):
-        response.app_iter = body_or_iter
-    else:
-        raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
+            raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
 
     #print "makeResponse: extra: %s %s is str:%s" % (type(extra), extra, isinstance(extra, str))
     
