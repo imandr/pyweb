@@ -237,66 +237,6 @@ class WebPieHandler:
                         out[k] = v
         return out
         
-    def ___walk_down(self, request, path_to, path_down):
-        self.Path = path_to
-        while path_down and not path_down[0]:
-            path_down = path_down[1:]
-
-        method = None
-        response = None
-        if not path_down:
-            # if empty path
-            if hasattr(self, "index"):                  # try index
-                response = self.redirect("index")
-            elif callable(self):                        # or __call__
-                response = self(request, "", **request.environ["query_dict"])
-        else:
-            item_name = path_down[0]
-            if hasattr(self, item_name):
-                path_down = path_down[1:]
-                item = getattr(self, item_name)
-                if isinstance(item, WebPieHandler):
-                    if path_to[-1] != '/':  path_to += '/'
-                    path_to += item_name
-                    response = item.walk_down(request, path_to, path_down)
-                elif callable(item):
-                    allowed = False
-                    if self.App._Strict:
-                        allowed = (
-                                (self._Methods is not None 
-                                        and item_name in self._Methods)
-                            or
-                                (hasattr(item, "__doc__") 
-                                        and item.__doc__ == _WebMethodSignature)
-                            )
-                    else:
-                        allowed = self._Methods is None or method_name in self._Methods
-                    if allowed:
-                        relpath = "/".join(path_down)
-                        response = item(request, relpath, **request.environ["query_dict"])
-                    else:
-                        return HTTPForbidden(request.path_info)
-            else:
-                relpath = "/".join(path_down)
-                for pattern, handler in self.RouteMap:
-                    if fnmatch.fnmatch(pattern, relpath):
-                        if path_to[-1] != '/':  path_to += '/'
-                        path_to += item_name
-                        response = handler.walk_down(request, path_to, path_down[1:])
-                    
-        if response is None and callable(self):
-            relpath = "/".join(path_down)
-            response = self(request, relpath, **request.environ["query_dict"])
-                    
-        if response is None:
-            return HTTPNotFound("Invalid path %s" % (request.path_info,))
-        
-        try:    
-            response = makeResponse(response)
-        except ValueError as e:
-            response = self.App.applicationErrorResponse(str(e), sys.exc_info())
-    
-        return response
                 
     def walk_down(self, request, path_down, args):
 
