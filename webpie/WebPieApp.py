@@ -426,16 +426,6 @@ class WebPieHandler:
         
 class WebPieStaticHandler(WebPieHandler):
 
-    MIME_TYPES_BASE = {
-        "gif":   "image/gif",
-        "jpg":   "image/jpeg",
-        "jpeg":   "image/jpeg",
-        "js":   "text/javascript",
-        "html":   "text/html",
-        "txt":   "text/plain",
-        "css":  "text/css"
-    }
-
     def __init__(self, root_path):
         WebPieHandler.__init__(self, None, None, None)
         self.RootPath = root_path
@@ -469,6 +459,16 @@ class WebPieStaticHandler(WebPieHandler):
 class WebPieApp(object):
 
     Version = "Undefined"
+
+    MIME_TYPES_BASE = {
+        "gif":   "image/gif",
+        "jpg":   "image/jpeg",
+        "jpeg":   "image/jpeg",
+        "js":   "text/javascript",
+        "html":   "text/html",
+        "txt":   "text/plain",
+        "css":  "text/css"
+    }
 
     def __init__(self, root_class, strict=False, 
             static_path="/static", static_location="static", enable_static=False,
