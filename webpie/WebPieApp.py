@@ -8,6 +8,18 @@ from threading import RLock
 PY2 = sys.version_info[0] == 2
 PY3 = sys.version_info[0] == 3
 
+if PY3:
+    def to_bytes(s):    
+        return s.encode("utf-8")
+    def to_str(b):    
+        return b.decode("utf-8", "ignore")
+else:
+    def to_bytes(s):    
+        return bytes(s)
+    def to_str(b):    
+        return str(b)
+    
+
 try:
     from collections.abc import Iterable    # Python3
 except ImportError:
@@ -119,8 +131,10 @@ def makeResponse(resp):
         body_or_iter, status, extra = resp
     elif PY2 and isinstance(resp, (str, bytes, unicode)):
         body_or_iter = resp
-    elif PY3 and isinstance(resp, (str, bytes)):
+    elif PY3 and isinstance(resp, bytes):
         body_or_iter = resp
+    elif PY3 and isinstance(resp, str):
+        body_or_iter = to_bytes(resp)
     elif isinstance(resp, int):
         status = resp
     elif isinstance(resp, Iterable):
@@ -414,9 +428,9 @@ class WebPieHandler:
         raise HTTPException("200 OK", self.render_to_response(template, **params))
 
     def env(self, req, relpath, **args):
-        lines = ["WSGI environment\n----------------------\n"]
+        lines = [b"WSGI environment\n----------------------\n"]
         for k in sorted(req.environ.keys()):
-            lines.append("%s = %s\n" % (k, req.environ[k]))
+            lines.append(to_bytes("%s = %s\n" % (k, req.environ[k])))
         return Response(app_iter = lines, content_type = "text/plain")
     
     @property
@@ -436,7 +450,6 @@ class WebPieStaticHandler(WebPieHandler):
             relpath = relpath.replace("..",".")
         home = self.RootPath
         path = os.path.join(home, relpath)
-        print "path:", path
         try:
             st_mode = os.stat(path).st_mode
             if not stat.S_ISREG(st_mode):
