@@ -30,10 +30,10 @@ def webmethod(permissions=None):
     #   def method(self, req, relpath, **args):
     #       ...
     #
+    if isinstance(permissions, str):
+        permissions = [permissions]
     def decorator(method):
         def decorated(handler, request, relpath, *params, **args):
-            if isinstance(permissions, str):
-                permissions = [permissions]
             if permissions is not None:
                 try:    roles = handler._roles(request, relpath)
                 except:
