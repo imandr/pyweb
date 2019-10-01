@@ -1,6 +1,6 @@
 # time_returns.py
 
-from webpie import WebPieApp, WebPieHandler
+from webpie import WebPieApp, WebPieHandler, Response
 import time, json
 
 class MyHandler(WebPieHandler):						
@@ -12,7 +12,7 @@ class MyHandler(WebPieHandler):
         return time.ctime()+"\n", "text/plain"		
     
     def time_response(self, request, relpath):
-        return Response(time_ctime()+"\n", content_type="text/plain")
+        return Response(time.ctime()+"\n", content_type="text/plain")
         
     def time_generator(self, request, relpath, n=5):
         n = int(n)

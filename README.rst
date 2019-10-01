@@ -174,10 +174,10 @@ Any handler in the tree can have its own methods. For example:
 	1.0.2
 
 
-Application and Handler Lifetime
---------------------------------
+Application and Handler
+-----------------------
 
-The WebPieApp object is created *once* when the web server starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When the handler object is created, it receives the pointer to the app object as its constructor argument. Also, for convenience, Handler object's App member always pointt to the app object. This allows the app object to keep some persistent information and let handler objects access it. For example, or clock application can also maintain number of requests it has received:
+The WebPieApp object is created *once* when the web server instance starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When the handler object is created, it receives the pointer to the app object as its constructor argument. Also, for convenience, Handler object's App member always pointt to the app object. This allows the app object to keep some persistent information and let handler objects access it. For example, or clock application can also maintain number of requests it has received:
 
 .. code-block:: python
 
@@ -358,3 +358,91 @@ iterable, content_type
 iterable, status, content_type
 iterable, status, headers
 ======================================  =================================== ==================================================================
+
+
+Threaded Applications
+---------------------
+WebPie provides several mechanisms to build thread safe applications. When working in multithreaded environment, WebPie Handler
+objects are concurrently created in their own threads, one for each request, whereas WebApp object is created only once and it
+is shared by all the threads handling the requests. This feature makes it possible to use the App object for inter-handler
+synchronization. The App object has its own lock object and threads can use it in 2 different ways:
+
+atomic decorator
+~~~~~~~~~~~~~~~~
+Decorating a web method with "atomic" decorator makes the web method atomic in the sense that if a handler thread enters such
+a method, any other handler thread of the same application will block before entering any atomic method until the first thread returns from the method.
+
+For example:
+
+.. code-block:: python
+
+	from webpie import WebPieApp, WebPieHandler, atomic
+
+	class MyApp(WebPieApp):
+    
+	    def __init__(self, root_class):
+	        WebPieApp.__init__(self, root_class)
+	        self.Memory = {}
+    
+	class Handler(WebPieHandler):
+    
+	    @atomic
+	    def set(self, req, relpath, name=None, value=None, **args):
+	        self.App.Memory[name]=value
+        
+	    @atomic
+	    def get(self, req, relpath, name=None, **args):
+	        return self.App.Memory.get(name, "(undefined)")
+        
+	application = MyApp(Handler)
+	application.run_server(8002)
+
+You can also decorate methods of the App. For example:
+
+.. code-block:: python
+
+	from webpie import WebPieApp, WebPieHandler, atomic
+
+	class MyApp(WebPieApp):
+    
+	    RecordSize = 10
+    
+	    def __init__(self, root_class):
+	        WebPieApp.__init__(self, root_class)
+	        self.Record = []
+        
+	    @atomic
+	    def add(self, value):
+	        if value in self.Record:
+	            self.Record.remove(value)
+	        self.Record.insert(0, value)
+	        if len(self.Record) > self.RecordSize:
+	            self.Record = self.Record[:self.RecordSize]
+        
+	    @atomic
+	    def find(self, value):
+	        try:    i = self.Record.index(value)
+	        except ValueError:
+	            return "not found"
+	        self.Record.pop(i)
+	        self.Record.insert(0, value)
+	        return str(i)
+        
+	class Handler(WebPieHandler):
+    
+	    def add(self, req, relpath, **args):
+	        return self.App.add(relpath)
+        
+	    def find(self, req, relpath, **args):
+	        return self.App.find(relpath)
+        
+	application = MyApp(Handler)
+	application.run_server(8002)
+
+
+App object as a context manager
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Another to implement a critical section is to use the App object as the context manager:
+
+
+
