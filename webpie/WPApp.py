@@ -464,7 +464,7 @@ class WPApp(object):
         return self._AppLock.__enter__()
         
     def __exit__(self, *params):
-        return self._AppLock.__exit(*params)
+        return self._AppLock.__exit__(*params)
     
     # override
     @app_synchronized

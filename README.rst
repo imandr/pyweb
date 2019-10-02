@@ -359,6 +359,41 @@ iterable, status, content_type
 iterable, status, headers
 ======================================  =================================== ==================================================================
 
+Static Content
+--------------
+
+Sometimes the application needs to serve static content like HTML documents, CSS stylesheets, JavaScript code.
+WebPie App can be configured to serve static file from certain directory in the file system.
+
+
+.. code-block:: python
+
+    class MyHandler(WebPieHandler):
+        #...
+
+    class MyApp(WebPieApp):
+        #...
+        
+    application = MyApp(MyHandler, 
+            static_enabled = True,
+            static_path = "/static", 
+            static_location = "./scripts")
+            
+    application.run_server(8002)
+    
+    
+If you run such an application, a request for URL like "http://..../static/code.js" will result in
+delivery of file local file ./scripts/code.js. static_location can be either relative to the working
+directory where the application runs or an absolute path.
+
+Because serving files from local file system is a potential security vulnerability, this
+functionality must be explicitly enabled with static_enabled=True. static_path and static_locations
+have defaults:
+
+.. code-block:: python
+
+    static_path = "/static"
+    static_location = "./static"
 
 Threaded Applications
 ---------------------
@@ -376,26 +411,27 @@ For example:
 
 .. code-block:: python
 
-	from webpie import WebPieApp, WebPieHandler, atomic
+    from webpie import WebPieApp, WebPieHandler, atomic
 
-	class MyApp(WebPieApp):
+    class MyApp(WebPieApp):
     
-	    def __init__(self, root_class):
-	        WebPieApp.__init__(self, root_class)
-	        self.Memory = {}
+        def __init__(self, root_class):
+            WebPieApp.__init__(self, root_class)
+            self.Memory = {}
     
-	class Handler(WebPieHandler):
+    class Handler(WebPieHandler):
     
-	    @atomic
-	    def set(self, req, relpath, name=None, value=None, **args):
-	        self.App.Memory[name]=value
+        @atomic
+        def set(self, req, relpath, name=None, value=None, **args):
+            self.App.Memory[name]=value
+            return "OK\n"
         
-	    @atomic
-	    def get(self, req, relpath, name=None, **args):
-	        return self.App.Memory.get(name, "(undefined)")
+        @atomic
+        def get(self, req, relpath, name=None, **args):
+            return self.App.Memory.get(name, "(undefined)")+"\n"
         
-	application = MyApp(Handler)
-	application.run_server(8002)
+    application = MyApp(Handler)
+    application.run_server(8002)
 
 You can also decorate methods of the App. For example:
 
@@ -444,5 +480,29 @@ App object as a context manager
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Another to implement a critical section is to use the App object as the context manager:
 
+
+.. code-block:: python
+
+    from webpie import WebPieApp, WebPieHandler
+
+    class MyApp(WebPieApp):
+    
+        def __init__(self, root_class):
+            WebPieApp.__init__(self, root_class)
+            self.Memory = {}
+    
+    class Handler(WebPieHandler):
+    
+        def set(self, req, relpath, name=None, value=None, **args):
+            with self.App:
+                self.App.Memory[name]=value
+            return "OK\n"
+        
+        def get(self, req, relpath, name=None, **args):
+            with self.App:
+                return self.App.Memory.get(name, "(undefined)") + "\n"
+        
+    application = MyApp(Handler)
+    application.run_server(8002)
 
 

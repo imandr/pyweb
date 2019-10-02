@@ -1,4 +1,4 @@
-from webpie import WebPieApp, WebPieHandler, atomic
+from webpie import WebPieApp, WebPieHandler
 
 class MyApp(WebPieApp):
     
@@ -8,14 +8,14 @@ class MyApp(WebPieApp):
     
 class Handler(WebPieHandler):
     
-    @atomic
     def set(self, req, relpath, name=None, value=None, **args):
-        self.App.Memory[name]=value
+        with self.App:
+            self.App.Memory[name]=value
         return "OK\n"
         
-    @atomic
     def get(self, req, relpath, name=None, **args):
-        return self.App.Memory.get(name, "(undefined)")+"\n"
+        with self.App:
+            return self.App.Memory.get(name, "(undefined)") + "\n"
         
 application = MyApp(Handler)
 application.run_server(8002)

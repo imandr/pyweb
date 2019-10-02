@@ -484,7 +484,7 @@ class WebPieApp(object):
     }
 
     def __init__(self, root_class, strict=False, 
-            static_path="/static", static_location="static", enable_static=False,
+            static_path="/static", static_location="./static", enable_static=False,
             disable_robots=True):
         assert issubclass(root_class, WebPieHandler)
         self.RootClass = root_class
@@ -505,7 +505,7 @@ class WebPieApp(object):
         return self._AppLock.__enter__()
         
     def __exit__(self, *params):
-        return self._AppLock.__exit(*params)
+        return self._AppLock.__exit__(*params)
     
     # override
     @app_synchronized
