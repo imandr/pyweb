@@ -10,9 +10,9 @@ PY3 = sys.version_info[0] == 3
 
 if PY3:
     def to_bytes(s):    
-        return s.encode("utf-8")
+        return s if isinstance(s, bytes) else s.encode("utf-8")
     def to_str(b):    
-        return b.decode("utf-8", "ignore")
+        return b if isinstance(b, str) else b.decode("utf-8", "ignore")
 else:
     def to_bytes(s):    
         return bytes(s)
@@ -146,13 +146,21 @@ def makeResponse(resp):
     
     if body_or_iter is not None:
         if isinstance(body_or_iter, str):
-            if sys.version_info >= (3,):
+            if PY3:
                 response.text = body_or_iter
             else:
                 response.text = unicode(body_or_iter, "utf-8")
         elif isinstance(body_or_iter, bytes):
             response.body = body_or_iter
         elif isinstance(body_or_iter, Iterable):
+            if PY3:
+                if hasattr(body_or_iter, "__next__"):
+                    print ("converting iterator")
+                    body_or_iter = (to_bytes(x) for x in body_or_iter)
+                else:
+                    # assume list or tuple
+                    print ("converting list")
+                    body_or_iter = [to_bytes(x) for x in body_or_iter]
             response.app_iter = body_or_iter
         else:
             raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
@@ -305,6 +313,9 @@ class WPHandler:
         resp = Response("Hello")
         return resp
        
+    def echo(self, req, relpath, **args):
+        return ["relpath: %s\n" % (relpath,)] + ["%s = %s\n" % (k, v) for k, v in args.items()], "text/plain"
+       
     def env(self, req, relpath):
         return (
             "%s = %s\n" % (k, repr(v)) for k, v in sorted(req.environ.items())
@@ -444,6 +455,7 @@ class WPApp(object):
 
     def __init__(self, root_class, strict=False, 
             static_path="/static", static_location="static", enable_static=False,
+            prefix=None, replace_prefix=None,
             disable_robots=True):
         assert issubclass(root_class, WPHandler)
         self.RootClass = root_class
@@ -456,6 +468,8 @@ class WPApp(object):
         self.StaticEnabled = enable_static and static_location
         self.Initialized = False
         self.DisableRobots = disable_robots
+        self.Prefix = prefix
+        self.ReplacePrefix = replace_prefix
 
     def _app_lock(self):
         return self._AppLock
@@ -534,11 +548,46 @@ class WPApp(object):
         #print "returning response..."
         return Response(app_iter = read_iter(open(path, "rb")),
             content_type = mime_type)
+            
+    def convertPath(self, path):
+        if self.Prefix is not None:
+            matched = ""
+            ok = False
+            if path == self.Prefix:
+                matched = path
+                ok = True
+            elif path.startswith(self.Prefix + '/'):
+                matched = self.Prefix
+                ok = True
+                
+            if not ok:
+                return None
+                
+            print("convertPath: %s:%s -> %s %s" % (path, self.Prefix, matched, ok))
+
+            if self.ReplacePrefix is not None:
+                path = self.ReplacePrefix + (path[len(matched):] or "/")
+                
+            print("convertPath:    -> %s" % (path,))
+                
+        return path
+                
+            
 
     def __call__(self, environ, start_response):
         #print 'app call ...'
         path = environ.get('PATH_INFO', '')
+        environ["WebPie.original_path"] = path
         #print 'path:', path_down
+        
+        path = self.convertPath(path)
+        if path is None:
+            return HTTPNotFound()(environ, start_response)
+        
+        environ["PATH_INFO"] = path
+
+        print("__call__: path=%s" % (path,))
+        
         req = Request(environ)
         if not self.Initialized:
             self.ScriptName = environ.get('SCRIPT_NAME','')

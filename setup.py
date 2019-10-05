@@ -25,6 +25,7 @@ setup(
     url = "https://github.com/imandr/webpie",
     packages=['webpie', 'samples', 'webpie/webob'],
     long_description=read('README.rst'),
+    install_requires=["pythreader"],
     classifiers=[
         "Operating System :: POSIX",
         "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
