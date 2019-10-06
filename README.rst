@@ -23,7 +23,7 @@ Here is the simplest web application you can write:
 	application = WPApp(MyHandler)                      # 4
 
 
-Let's go over the code line by line.
+Let's go over the code line by line:
 
 1. We created class MyHandler, which will handle HTTP requests. In order to work with WebPie, it 
 has to be a subclass of WPHandler class.
