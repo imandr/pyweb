@@ -25,8 +25,7 @@ Here is the simplest web application you can write:
 
 Let's go over the code line by line:
 
-1. We created class MyHandler, which will handle HTTP requests. In order to work with WebPie, it 
-has to be a subclass of WPHandler class.
+1. We created class MyHandler, which will handle HTTP requests. In order to work with WebPie, it has to be a subclass of WPHandler class.
 
 2. We defined one web method "hello", which will be called when a URL like http://host.org/hello is requested.
 
