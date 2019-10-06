@@ -26,6 +26,7 @@ setup(
     packages=['webpie', 'samples', 'webpie/webob'],
     long_description=read('README.rst'),
     install_requires=["pythreader"],
+    zip_safe = False,
     classifiers=[
         "Operating System :: POSIX",
         "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",

@@ -1,8 +1,8 @@
 # time_fields.py
-from webpie import WebPieApp, WebPieHandler
+from webpie import WPApp, WPHandler
 from datetime import datetime
 
-class MyHandler(WebPieHandler):						
+class MyHandler(WPHandler):						
 
 	def time(self, request, relpath):				# 1
 		t = datetime.now()
@@ -21,5 +21,5 @@ class MyHandler(WebPieHandler):
 		elif relpath == "second":
 			return str(t.second)+"\n"
 
-application = WebPieApp(MyHandler)
+application = WPApp(MyHandler)
 application.run_server(8080)

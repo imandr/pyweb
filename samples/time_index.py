@@ -1,9 +1,9 @@
 # time_index.py
 
-from webpie import WebPieApp, WebPieHandler
+from webpie import WPApp, WPHandler
 import time
 
-class MyHandler(WebPieHandler):						
+class MyHandler(WPHandler):						
 
 	def time(self, request, relpath):
 		return time.ctime()+"\n", "text/plain"	
@@ -11,4 +11,4 @@ class MyHandler(WebPieHandler):
 	def index(self, request, relpath):
 		return "[index] "+time.ctime()+"\n", "text/plain" 
 
-WebPieApp(MyHandler).run_server(8080)
+WPApp(MyHandler).run_server(8080)

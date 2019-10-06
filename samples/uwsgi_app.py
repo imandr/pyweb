@@ -1,15 +1,15 @@
-from webpie import WebPieApp, WebPieHandler, run_server, Response
+from webpie import WPApp, WPHandler, run_server, Response
 
-class MyApp(WebPieApp):
+class MyApp(WPApp):
     pass
     
-class SubHandler(WebPieHandler):
+class SubHandler(WPHandler):
     pass
     
-class TopHandler(WebPieHandler):
+class TopHandler(WPHandler):
     
-    def __init__(self, request, app, path):
-        WebPieHandler.__init__(self, request, app, path)
+    def __init__(self, *params):
+        WPHandler.__init__(self, *params)
         self.A = SubHandler(request, app, "/A")
         
     def hello(self, request, relpath, **args):

@@ -1,11 +1,11 @@
-from webpie import WebPieApp, WebPieHandler
+from webpie import WPApp, WPHandler
 
 def robots(request, relpath, **args):
         return "reject"
 
-class MyHandler(WebPieHandler):
-    def __init__(self, request, path):
-        WebPieHandler.__init__(self, request, path)
+class MyHandler(WPHandler):
+    def __init__(self, *params):
+        WPHandler.__init__(self, *params)
         self.addHandler("robots.txt", "reject", 400)
 
-WebPieApp(MyHandler).run_server(8080)
+WPApp(MyHandler).run_server(8080)

@@ -1,13 +1,13 @@
-from webpie import atomic, WebPieApp, WebPieHandler, run_server, Response
+from webpie import atomic, WPApp, WPHandler, run_server, Response
 import time
 
-class MyApp(WebPieApp):
+class MyApp(WPApp):
     
     def __init__(self, root_class):
-        WebPieApp.__init__(self, root_class)
+        WPApp.__init__(self, root_class)
         self.Count = 0
         
-class MyHandler(WebPieHandler):
+class MyHandler(WPHandler):
 
     @atomic
     def hello(self, request, relpath, t=3):

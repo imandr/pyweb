@@ -1,27 +1,27 @@
 # time_hello_split.py
-from webpie import WebPieApp, WebPieHandler
+from webpie import WPApp, WPHandler
 import time
 
-class Greeter(WebPieHandler):						
+class Greeter(WPHandler):						
 
 	def hello(self, request, relpath):				
 		return "Hello, World!\n"					
 
-class Clock(WebPieHandler):						
+class Clock(WPHandler):						
 
 	def time(self, request, relpath):				# 1
 		return time.ctime()+"\n", "text/plain"		# 2
 
-class TopHandler(WebPieHandler):
+class TopHandler(WPHandler):
 
-	def __init__(self, *params, **kv):
-		WebPieHandler.__init__(self, *params, **kv)
-		self.greet = Greeter(*params, **kv)
-		self.clock = Clock(*params, **kv)
+	def __init__(self, *params):
+		WPHandler.__init__(self, *params)
+		self.greet = Greeter(*params)
+		self.clock = Clock(*params)
 
 	def version(self, request, relpath):
 		return "1.0.2"
 
 
-application = WebPieApp(TopHandler)
+application = WPApp(TopHandler)
 application.run_server(8080)

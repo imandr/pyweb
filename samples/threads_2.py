@@ -1,11 +1,11 @@
-from webpie import WebPieApp, WebPieHandler, atomic
+from webpie import WPApp, WPHandler, atomic
 
-class MyApp(WebPieApp):
+class MyApp(WPApp):
     
     RecordSize = 10
     
     def __init__(self, root_class):
-        WebPieApp.__init__(self, root_class)
+        WPApp.__init__(self, root_class)
         self.Record = []
         
     @atomic
@@ -25,7 +25,7 @@ class MyApp(WebPieApp):
         self.Record.insert(0, value)
         return str(i)
         
-class Handler(WebPieHandler):
+class Handler(WPHandler):
     
     def add(self, req, relpath, **args):
         return self.App.add(relpath)

@@ -1,12 +1,12 @@
-from webpie import WebPieApp, WebPieHandler, atomic
+from webpie import WPApp, WPHandler, atomic
 
-class MyApp(WebPieApp):
+class MyApp(WPApp):
     
     def __init__(self, root_class):
-        WebPieApp.__init__(self, root_class)
+        WPApp.__init__(self, root_class)
         self.Memory = {}
     
-class Handler(WebPieHandler):
+class Handler(WPHandler):
     
     @atomic
     def set(self, req, relpath, name=None, value=None, **args):

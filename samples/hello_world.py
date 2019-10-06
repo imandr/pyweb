@@ -1,8 +1,8 @@
 # hello_world.py
-from webpie import WebPieApp, WebPieHandler
+from webpie import WPApp, WPHandler
 import time
 
-class MyHandler(WebPieHandler):						
+class MyHandler(WPHandler):						
 
 	def hello(self, request, relpath):				
 		return "Hello, World!\n"					
@@ -10,4 +10,4 @@ class MyHandler(WebPieHandler):
 	def time(self, request, relpath):			# 1
 		return time.ctime()+"\n", "text/plain"		# 2
 
-application = WebPieApp(MyHandler)
+application = WPApp(MyHandler)

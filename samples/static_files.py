@@ -1,12 +1,12 @@
-from webpie import WebPieApp
-from webpie import WebPieHandler, WebPieStaticHandler
+from webpie import WPApp
+from webpie import WPHandler, WebPieStaticHandler
 from webpie import run_server
 from webpie import Response
 
-class MyApp(WebPieApp):
+class MyApp(WPApp):
     pass
     
-class TopHandler(WebPieHandler):
+class TopHandler(WPHandler):
     
     def hello(self, request, relpath, **args):
         return "Hello world!", "text/plain"

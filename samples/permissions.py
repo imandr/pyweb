@@ -1,8 +1,8 @@
 # permissions.py
-from webpie import WebPieApp, WebPieHandler, run_server, webmethod
+from webpie import WPApp, WPHandler, run_server, webmethod
 import time
 
-class H_methods(WebPieHandler):	
+class H_methods(WPHandler):	
 
     _Methods = ["hello"]		
 
@@ -12,7 +12,7 @@ class H_methods(WebPieHandler):
     def wrong(self, request, relpath):
         return "This should never happen\n"
         
-class H_decorators(WebPieHandler):
+class H_decorators(WPHandler):
 
     @webmethod()
     def hello(self, request, relpath):				
@@ -22,7 +22,7 @@ class H_decorators(WebPieHandler):
     def wrong(self, request, relpath):
         return "This should never happen\n"
 
-class H_permissions(WebPieHandler):
+class H_permissions(WPHandler):
 
     def _roles(self, request, relpath):
         return [relpath]
@@ -35,7 +35,7 @@ class H_permissions(WebPieHandler):
     def read_only(self, request, relpath):
         return "Read access granted\n"
 
-class H_open(WebPieHandler):
+class H_open(WPHandler):
 
     def hello(self, request, relpath):				
 	    return "Hello, World!\n"	
@@ -43,16 +43,16 @@ class H_open(WebPieHandler):
     def wrong(self, request, relpath):
         return "This should never happen\n"
 
-class Top(WebPieHandler):
+class Top(WPHandler):
 
-    def __init__(self, req, app, path):
-        WebPieHandler.__init__(self, req, app, path)
+    def __init__(self, *params):
+        WPHandler.__init__(self, *params)
 
         self.o = H_open(req, app, path)
         self.m = H_methods(req, app, path)
         self.d = H_decorators(req, app, path)
         self.p = H_permissions(req, app, path)
 
-application = WebPieApp(Top, strict=True)
+application = WPApp(Top, strict=True)
 application.run_server(8080)
 

@@ -1,9 +1,9 @@
-from webpie import WebPieSessionApp, WebPieHandler, run_server, Response
+from webpie import WebPieSessionApp, WPHandler, run_server, Response
 
 class MyApp(WebPieSessionApp):
     pass
     
-class MyHandler(WebPieHandler):
+class MyHandler(WPHandler):
 
     def set(self, request, relpath, **args):
         for k, v in args.items():

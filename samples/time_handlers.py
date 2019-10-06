@@ -1,14 +1,14 @@
 # time_returns.py
 
-from webpie import WebPieApp, WebPieHandler, Response, webmethod, WebPieStaticHandler
+from webpie import WPApp, WPHandler, Response, webmethod, WebPieStaticHandler
 import time, json
 
-class CallableHandler(WebPieHandler):
+class CallableHandler(WPHandler):
     
     def __call__(self, request, relpath, **args):
         return (relpath or "hi there")+"\n", "text/plain"
         
-class RegularHandler(WebPieHandler):
+class RegularHandler(WPHandler):
 
     _Strict = False
     
@@ -16,7 +16,7 @@ class RegularHandler(WebPieHandler):
     def time(self, request, relpath, **args):
         return time.ctime()+"\n"
         
-class TopHandler(WebPieHandler):
+class TopHandler(WPHandler):
     
     RouteMap = [
         ("Responder",       "constant text\n"),
@@ -25,8 +25,8 @@ class TopHandler(WebPieHandler):
         ("robots.txt",      "User-agent: *\nDisallow: /"),
     ]
     
-    def __init__(self, request, app, path):
-        WebPieHandler.__init__(self, request, app, path)
+    def __init__(self, *params):
+        WPHandler.__init__(self, *params)
         self.Regular = RegularHandler(request, app, path)
         self.static = WebPieStaticHandler("static")
         
@@ -37,4 +37,4 @@ class TopHandler(WebPieHandler):
         return "top method"
 
         
-WebPieApp(TopHandler).run_server(8080)
+WPApp(TopHandler).run_server(8080)

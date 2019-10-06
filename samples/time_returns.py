@@ -1,9 +1,9 @@
 # time_returns.py
 
-from webpie import WebPieApp, WebPieHandler, Response
+from webpie import WPApp, WPHandler, Response
 import time, json
 
-class MyHandler(WebPieHandler):						
+class MyHandler(WPHandler):						
 
     def hello(self, request, relpath):				
         return "Hello, World!\n"					
@@ -36,4 +36,4 @@ class MyHandler(WebPieHandler):
         )
         return json.dumps(data), "text/json"
         
-WebPieApp(MyHandler).run_server(8080)
+WPApp(MyHandler).run_server(8080)

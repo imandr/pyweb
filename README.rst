@@ -13,28 +13,29 @@ Here is the simplest web application you can write:
 
 	# hello_world.py
 
-	from webpie import WebPieApp, WebPieHandler		
+	from webpie import WPApp, WPHandler		
 		
-	class MyHandler(WebPieHandler):                     # 1
+	class MyHandler(WPHandler):                         # 1
 	
 	    def hello(self, request, relpath):              # 2
 	        return "Hello, World!\n"                    # 3
 			
-	application = WebPieApp(MyHandler)                  # 4
+	application = WPApp(MyHandler)                      # 4
 
 
-What did we just write ? Let's go over the code line by line.
+Let's go over the code line by line.
 
-1. We created class MyHandler, which will handle HTTP requests. It has to be a subclass of WebPieHandler class.
-2. We defined one web method "hello".
-3. It will always return text "Hello, World!"
-4. Finally, we created a WSGI application as an instance of WebPieApp class, passing it the MyHandler class as an argument.
+1. We created class MyHandler, which will handle HTTP requests. In order to work with WebPie, it 
+has to be a subclass of WPHandler class.
+2. We defined one web method "hello", which will be called when a URL like http://host.org/hello is requested.
+3. It will always return text "Hello, World!".
+4. Finally, we created a WSGI application as an instance of WPApp class, passing it the MyHandler class as an argument.
 
 Now we can plug our application into any WSGI framework such as uWSGI or Apache httpd, e.g.:
 
 .. code-block:: bash
 
-	uwsgi --http :8080 --wsgi-file hello_world.py
+	$ uwsgi --http :8080 --wsgi-file hello_world.py
 
 
 and try it:
@@ -46,21 +47,28 @@ and try it:
 	$ 
 
 
-If you do not want to use uWSGI or similar framework, you can use WebPie's own HTTP server to publich your application on the web:
+If you do not want to use uWSGI or similar framework, you can use WebPie's own HTTP server to put your application on the web:
 
 .. code-block:: python
 
 	# hello_world_server.py
-	from webpie import WebPieApp, WebPieHandler, run_server
+	from webpie import WPApp, WPHandler, run_server
 	import time
 
-	class MyHandler(WebPieHandler):						
+	class MyHandler(WPHandler):						
 
 		def hello(self, request, relpath):				
 			return "Hello, World!\n"					
 
-	application = WebPieApp(MyHandler)
-	application.run_server(8080)
+	application = WPApp(MyHandler)
+	application.run_server(8080)        # run the server at port 8080
+
+.. code-block:: bash
+
+	$ python hello_world_server.py &
+	$ curl http://localhost:8080/hello
+	Hello world!
+    $
 
 URL Structure
 -------------
@@ -68,10 +76,10 @@ Notice that MyHandler class has single method "hello" and it maps to the URL pat
 
 .. code-block:: python
 
-	from webpie import WebPieApp, WebPieHandler
+	from webpie import WPApp, WPHandler
 	import time
 
-	class MyHandler(WebPieHandler):						
+	class MyHandler(WPHandler):						
 
 		def hello(self, request, relpath):				
 			return "Hello, World!\n"					
@@ -79,7 +87,7 @@ Notice that MyHandler class has single method "hello" and it maps to the URL pat
 		def time(self, request, relpath):
 			return time.ctime()+"\n"
 
-	application = WebPieApp(MyHandler)
+	application = WPApp(MyHandler)
 	application.run_server(8080)
 
 Now our handler can handle 2 types of requests, it can say hello and it can tell local time:
@@ -92,35 +100,35 @@ Now our handler can handle 2 types of requests, it can say hello and it can tell
 	Sun May  5 06:47:15 2019
 	$ 
 
-Notice that handler methods names automatically become parts of the URL path. There is no need (and no other way) to map WebPie methods to URL.
+Notice that handler methods names automatically become parts of the URL path.
 
-If you want to split your handler into different classes to organize your code better, you can have multiple handler classes in your application. For example, we may want to have one handler which focuses on reporting time and the other which says hello:
+If you want to split your handler into different classes to organize your code better, you can have nested handler classes in your application. For example, we may want to have one handler which focuses on reporting time and the other which says hello:
 
 .. code-block:: python
 
 	# time_hello_split.py
-	from webpie import WebPieApp, WebPieHandler
+	from webpie import WPApp, WPHandler
 	import time
 
-	class HelloHandler(WebPieHandler):						
+	class HelloHandler(WPHandler):						
 
 		def hello(self, request, relpath):				
 			return "Hello, World!\n"					
 
-	class ClockHandler(WebPieHandler):						
+	class ClockHandler(WPHandler):						
 
 		def time(self, request, relpath):			
 			return time.ctime()+"\n", "text/plain"	
 
-	class TopHandler(WebPieHandler):
+	class TopHandler(WPHandler):
 
-		def __init__(self, *params, **kv):
-			WebPieHandler.__init__(self, *params, **kv)
-			self.greet = HelloHandler(*params, **kv)
-			self.clock = ClockHandler(*params, **kv)
+		def __init__(self, *params):
+			WPHandler.__init__(self, *params)
+			self.greet = HelloHandler(*params)
+			self.clock = ClockHandler(*params)
 
 
-	application = WebPieApp(TopHandler)
+	application = WPApp(TopHandler)
 	application.run_server(8080)
 
 
@@ -129,42 +137,43 @@ web request. Top handler can create child handlers recursively. This recirsive h
 
 .. code-block:: bash
 
-	Sun May  5 07:39:11 2019
-	$ curl  http://localhost:8080/greet/hello
+	$ curl http://localhost:8080/greet/hello
 	Hello, World!
+	$ curl http://localhost:8080/clock/time
+	Sun May  5 06:49:14 2019
 	$ 
 
 For example, to find the method for URI "/greet/hello", WebPie starts with top handler, finds its child handler "greet" of class Greeter and then calls its "hello" method.
 
-Any handler in the tree can have its own methods. For example:
+Non-leaf handlers in the tree can have their own methods. For example:
 
 .. code-block:: python
 
 	# time_hello_split2.py
-	from webpie import WebPieApp, WebPieHandler
+	from webpie import WPApp, WPHandler
 	import time
 
-	class HelloHandler(WebPieHandler):						
+	class HelloHandler(WPHandler):						
 
 		def hello(self, request, relpath):				
 			return "Hello, World!\n"					
 
-	class ClockHandler(WebPieHandler):						
+	class ClockHandler(WPHandler):						
 
 		def time(self, request, relpath):			
 			return time.ctime()+"\n", "text/plain"	
 
-	class TopHandler(WebPieHandler):
+	class TopHandler(WPHandler):
 
 		def __init__(self, *params, **kv):
-			WebPieHandler.__init__(self, *params, **kv)
+			WPHandler.__init__(self, *params, **kv)
 			self.greet = HelloHandler(*params, **kv)
 			self.clock = ClockHandler(*params, **kv)
 		
 		def version(self, request, relpath):    # non-leaf handler can have a web method
 		    return "1.0.3"
 
-	application = WebPieApp(TopHandler)
+	application = WPApp(TopHandler)
 	application.run_server(8080)
 
 
@@ -177,15 +186,15 @@ Any handler in the tree can have its own methods. For example:
 Application and Handler
 -----------------------
 
-The WebPieApp object is created *once* when the web server instance starts and it exists until the server stops whereas WebPieHandler objects are created for each individual HTTP request. When the handler object is created, it receives the pointer to the app object as its constructor argument. Also, for convenience, Handler object's App member always pointt to the app object. This allows the app object to keep some persistent information and let handler objects access it. For example, or clock application can also maintain number of requests it has received:
+The WPApp object is created *once* when the web server instance starts and it persists until the server stops whereas WPHandler object trees are created for each individual HTTP request from scratch. Handler object's App member always points to its app object. This allows the app object to keep some persistent information and let handler objects access it. For example, or clock application can also maintain number of requests it has received:
 
 .. code-block:: python
 
 	# time_count.py
-	from webpie import WebPieApp, WebPieHandler
+	from webpie import WPApp, WPHandler
 	import time
 
-	class Handler(WebPieHandler):						
+	class Handler(WPHandler):						
 
 		def time(self, request, relpath):		
 			self.App.Counter += 1
@@ -195,10 +204,10 @@ The WebPieApp object is created *once* when the web server instance starts and i
 			return str(self.App.Counter)+"\n"
 
 
-	class App(WebPieApp):
+	class App(WPApp):
 
 		def __init__(self, handler_class):
-			WebPieApp.__init__(self, handler_class)
+			WPApp.__init__(self, handler_class)
 			self.Counter = 0
 
 	application = App(Handler)
@@ -219,14 +228,15 @@ The WebPieApp object is created *once* when the web server instance starts and i
 	3
 
 
-Of course the way it is written, our application is not very therad-safe, but we will talk about this later.
+Of course the way it is written, our application is not very therad-safe, but there is an easy way to fix it.
+We will talk about this later.
 
 Web Methods in Details
 ----------------------
 
-The web the WebPie server handler method has 2 fixed arguments and optional keyword arguments.
+The WebPie server handler method has 2 fixed arguments and optional keyword arguments.
 
-First argiment is the request object, which encapsulates all the information about the HTTP request. Currently WebPie uses WebOb library Request and Response classes to handle HTTP requests and responses.
+First argiment is the request object, which encapsulates all the information about the incoming HTTP request. Currently WebPie uses WebOb library Request and Response classes to handle HTTP requests and responses.
 
 Arguments
 ~~~~~~~~~
@@ -251,7 +261,9 @@ Request member.
 relpath
 .......
 
-Sometimes the URI elements are used as web service method arguments and relpath is the tail of the URI remaining unused after the mapping from URI to the method is done. For example, in our clock example, we may want to use URL like this to specify the field of the current time we want to see:
+Sometimes, while walking down the tree of handlers to find the method to handle the request, there will be some
+unused portion of URI after the name of the target handler method. For example, in our clock example, we may want to
+structure our URL to specify the field of the current time we want to see in the following way:
 
 .. code-block::
 
@@ -259,14 +271,15 @@ Sometimes the URI elements are used as web service method arguments and relpath 
 	http://localhost:8080/time/minute   # minute only
 	http://localhost:8080/time          # whole day/time
 
-Here is the code which does this:
+In this case, we want the "time" method to hadle all types of requests and know which portion of date/time to
+return. Here is the code which does this:
 
 .. code-block:: python
 
-	from webpie import WebPieApp, WebPieHandler
+	from webpie import WPApp, WPHandler
 	from datetime import datetime
 
-	class MyHandler(WebPieHandler):						
+	class MyHandler(WPHandler):						
 
 		def time(self, request, relpath):			
 			t = datetime.now()
@@ -285,27 +298,29 @@ Here is the code which does this:
 			elif relpath == "second":
 				return str(t.second)+"\n"
 
-	application = WebPieApp(MyHandler)
+	application = WPApp(MyHandler)
 	application.run_server(8080)
 
 url_args
 ........
 
-Typically URL includes so called query parameters, e.g.:
+Anoter, perhaps more conventional way of doing this is to use so called query parameters to specify the
+format of the date/time representation, e.g.:
 
 .. code-block::
 
 	http://localhost:8080/time?field=minute
 
-WebPie always parses query parameters and passes them to the handler method using keyword arguments. For example, we can write the method which extracts fields from current time like this:
+WebPie always parses query parameters and passes them to the handler method as if they were keyword arguments. 
+For example, we can write the method which extracts fields from current time like this:
 
 .. code-block:: python
 
 	# time_args.py
-	from webpie import WebPieApp, WebPieHandler
+	from webpie import WPApp, WPHandler
 	from datetime import datetime
 
-	class MyHandler(WebPieHandler):						
+	class MyHandler(WPHandler):						
 
 		def time(self, request, relpath, field="all"):		
 			t = datetime.now()
@@ -324,7 +339,7 @@ WebPie always parses query parameters and passes them to the handler method usin
 			elif field == "second":
 				return str(t.second)+"\n"
 
-	WebPieApp(MyHandler).run_server(8080)
+	WPApp(MyHandler).run_server(8080)
 
 
 and then call it like this:
@@ -368,10 +383,10 @@ WebPie App can be configured to serve static file from certain directory in the 
 
 .. code-block:: python
 
-    class MyHandler(WebPieHandler):
+    class MyHandler(WPHandler):
         #...
 
-    class MyApp(WebPieApp):
+    class MyApp(WPApp):
         #...
         
     application = MyApp(MyHandler, 
@@ -411,15 +426,15 @@ For example:
 
 .. code-block:: python
 
-    from webpie import WebPieApp, WebPieHandler, atomic
+    from webpie import WPApp, WPHandler, atomic
 
-    class MyApp(WebPieApp):
+    class MyApp(WPApp):
     
         def __init__(self, root_class):
-            WebPieApp.__init__(self, root_class)
+            WPApp.__init__(self, root_class)
             self.Memory = {}
     
-    class Handler(WebPieHandler):
+    class Handler(WPHandler):
     
         @atomic
         def set(self, req, relpath, name=None, value=None, **args):
@@ -437,14 +452,14 @@ You can also decorate methods of the App. For example:
 
 .. code-block:: python
 
-	from webpie import WebPieApp, WebPieHandler, atomic
+	from webpie import WPApp, WPHandler, atomic
 
-	class MyApp(WebPieApp):
+	class MyApp(WPApp):
     
 	    RecordSize = 10
     
 	    def __init__(self, root_class):
-	        WebPieApp.__init__(self, root_class)
+	        WPApp.__init__(self, root_class)
 	        self.Record = []
         
 	    @atomic
@@ -464,7 +479,7 @@ You can also decorate methods of the App. For example:
 	        self.Record.insert(0, value)
 	        return str(i)
         
-	class Handler(WebPieHandler):
+	class Handler(WPHandler):
     
 	    def add(self, req, relpath, **args):
 	        return self.App.add(relpath)
@@ -483,15 +498,15 @@ Another to implement a critical section is to use the App object as the context 
 
 .. code-block:: python
 
-    from webpie import WebPieApp, WebPieHandler
+    from webpie import WPApp, WPHandler
 
-    class MyApp(WebPieApp):
+    class MyApp(WPApp):
     
         def __init__(self, root_class):
-            WebPieApp.__init__(self, root_class)
+            WPApp.__init__(self, root_class)
             self.Memory = {}
     
-    class Handler(WebPieHandler):
+    class Handler(WPHandler):
     
         def set(self, req, relpath, name=None, value=None, **args):
             with self.App:
