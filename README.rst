@@ -27,8 +27,11 @@ Let's go over the code line by line.
 
 1. We created class MyHandler, which will handle HTTP requests. In order to work with WebPie, it 
 has to be a subclass of WPHandler class.
+
 2. We defined one web method "hello", which will be called when a URL like http://host.org/hello is requested.
+
 3. It will always return text "Hello, World!".
+
 4. Finally, we created a WSGI application as an instance of WPApp class, passing it the MyHandler class as an argument.
 
 Now we can plug our application into any WSGI framework such as uWSGI or Apache httpd, e.g.:
