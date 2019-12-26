@@ -586,7 +586,7 @@ class WPApp(object):
         
         environ["PATH_INFO"] = path
 
-        print("__call__: path=%s" % (path,))
+        #print("__call__: path=%s" % (path,))
         
         req = Request(environ)
         if not self.Initialized:
