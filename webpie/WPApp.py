@@ -5,20 +5,7 @@ from .webob.exc import HTTPTemporaryRedirect, HTTPException, HTTPFound, HTTPForb
 import os.path, os, stat, sys, traceback, fnmatch
 from threading import RLock
 
-PY2 = sys.version_info[0] == 2
-PY3 = sys.version_info[0] == 3
-
-if PY3:
-    def to_bytes(s):    
-        return s if isinstance(s, bytes) else s.encode("utf-8")
-    def to_str(b):    
-        return b if isinstance(b, str) else b.decode("utf-8", "ignore")
-else:
-    def to_bytes(s):    
-        return bytes(s)
-    def to_str(b):    
-        return str(b)
-    
+from .py3 import PY3, PY2, to_str, to_bytes
 
 try:
     from collections.abc import Iterable    # Python3
@@ -155,18 +142,16 @@ def makeResponse(resp):
         elif isinstance(body_or_iter, Iterable):
             if PY3:
                 if hasattr(body_or_iter, "__next__"):
-                    print ("converting iterator")
+                    #print ("converting iterator")
                     body_or_iter = (to_bytes(x) for x in body_or_iter)
                 else:
                     # assume list or tuple
-                    print ("converting list")
+                    #print ("converting list")
                     body_or_iter = [to_bytes(x) for x in body_or_iter]
             response.app_iter = body_or_iter
         else:
             raise ValueError("Unknown type for response body: " + str(type(body_or_iter)))
 
-    #print "makeResponse: extra: %s %s is str:%s" % (type(extra), extra, isinstance(extra, str))
-    
     if status is not None:
         response.status = status
      
@@ -235,11 +220,16 @@ class WPHandler:
             response = makeResponse(response)
         except ValueError as e:
             response = self.App.applicationErrorResponse(str(e), sys.exc_info())
+            
+        res = self.postprocessResponse(response)
+        if res is not None: response = res  # otherwise, use same response object
+        #print("postprocessed:", response)
+        
         out = response(environ, start_response)
         self.destroy()
         self._destroy()
         return out
-        
+    
     def parseQuery(self, query):
         out = {}
         for w in (query or "").split("&"):
@@ -274,9 +264,9 @@ class WPHandler:
                 return HTTPNotFound("Invalid path %s" % (request.path_info,))
         
         top_path_item = path_down[0]
-        
+
         # Try methods and members
-        if hasattr(self, top_path_item):
+        if not top_path_item.startswith("_") and hasattr(self, top_path_item):
             member = getattr(self, top_path_item)
             if isinstance(member, WPHandler):
                 child = member
@@ -309,18 +299,6 @@ class WPHandler:
         return HTTPNotFound("Invalid path %s" % (request.path_info,))
                     
         
-    def hello(self, req, relpath):
-        resp = Response("Hello")
-        return resp
-       
-    def echo(self, req, relpath, **args):
-        return ["relpath: %s\n" % (relpath,)] + ["%s = %s\n" % (k, v) for k, v in args.items()], "text/plain"
-       
-    def env(self, req, relpath):
-        return (
-            "%s = %s\n" % (k, repr(v)) for k, v in sorted(req.environ.items())
-        ), "text/plain"
-
     def _checkPermissions(self, x):
         #self.apacheLog("doc: %s" % (x.__doc__,))
         try:    docstr = x.__doc__
@@ -425,19 +403,40 @@ class WPHandler:
         params.update(args)
         raise HTTPException("200 OK", self.render_to_response(template, **params))
 
-    def env(self, req, relpath, **args):
-        lines = [
-            b"Path: %s\n" % (to_bytes(self.Path),),
-            b"WSGI environment\n----------------------\n"
-        ]
-        for k in sorted(req.environ.keys()):
-            lines.append(to_bytes("%s = %s\n" % (k, req.environ[k])))
-        return Response(app_iter = lines, content_type = "text/plain")
-    
     @property
     def session(self):
         return self.Request.environ["webpie.session"]
         
+    # standard (test) methods
+    
+    def hello(self, req, relpath):
+        return "Hello %s\n" % (relpath or "",), "text/plain"
+       
+    def echo(self, req, relpath, **args):
+        headers = {
+            "X-Request-relpath":    relpath or "",
+            "X-Request-path":       req.method,
+            "Content-Type":         req.headers.get("Content-Type", "text/plain")
+        }
+        for k, v in args.items():
+            headers["X-Request-query-arg-%s" % (k,)] = v
+        def body_iter(b):
+            x = b.read(10000)
+            while x:
+                yield x
+                x = b.read(10000)
+        return body_iter(req.body_file), headers
+        
+    def env(self, req, relpath):
+        return (
+            "%s = %s\n" % (k, repr(v)) for k, v in sorted(req.environ.items())
+        ), "text/plain"
+    
+    # overridable
+    def postprocessResponse(self, response):
+        return response
+        
+
         
 class WPApp(object):
 
@@ -563,12 +562,12 @@ class WPApp(object):
             if not ok:
                 return None
                 
-            print("convertPath: %s:%s -> %s %s" % (path, self.Prefix, matched, ok))
+            #print("convertPath: %s:%s -> %s %s" % (path, self.Prefix, matched, ok))
 
             if self.ReplacePrefix is not None:
                 path = self.ReplacePrefix + (path[len(matched):] or "/")
                 
-            print("convertPath:    -> %s" % (path,))
+            #print("convertPath:    -> %s" % (path,))
                 
         return path
                 
